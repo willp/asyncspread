@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import socket, struct, copy, asyncore, asynchat, time
+import socket, struct, copy, asyncore, asynchat, time, Queue
 
 class SpreadMessage(object):
     UNRELIABLE_MESS = 0x00000001
@@ -38,6 +38,11 @@ class AsyncSpread(asynchat.async_chat):
         self.start_time = time.time()
         self.ibuffer = ''
         self.ibuffer_start = 0
+        # queue_in is for messages read FROM the socket
+        self.queue_in = Queue.Queue()
+        # queue_out is for data destined to go OUT the socket
+        self.queue_out = Queue.Queue()
+        #
         self.msg_count = 0
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
@@ -81,11 +86,9 @@ class AsyncSpread(asynchat.async_chat):
         data = self.ibuffer[self.ibuffer_start:(self.ibuffer_start+self.need_bytes)]
         self.ibuffer_start += self.need_bytes
         if len(self.ibuffer) > 500:
-            #print 'TRIMMING: have %d bytes in ibuffer' % (len(self.ibuffer))
             self.ibuffer = self.ibuffer[self.ibuffer_start:]
             self.ibuffer_start = 0
         cb = self.next_state
-        #print 'FoundTerminator:  Copied %d bytes from position %d of self.ibuffer, next method: %s' % (self.need_bytes, self.ibuffer_start, cb)
         cb(data)
 
     def wait_bytes(self, need_bytes, next_state):

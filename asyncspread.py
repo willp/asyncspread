@@ -539,31 +539,11 @@ class ServiceTypes(object):
 
 # must optimize this more
 def protocol_Create(svcType, mesgtype, pname, gname, data_len=0):
-    hdr = svcType
-#    msg_header = []
-#    msg_header.append(pname)
-#    TAG3= '32s4s4s4s'
-
-    # big endian
-#    msg_header.append (struct.pack('>I', len(gname)))
-#    # little endian
-#    msg_header.append (struct.pack('<I', (mesgtype & 0xffff) << 8))
-#    # big endian
-#    msg_header.append (struct.pack('>I', data_len))
-
-    # little endian
-    msg_header = []
     mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
-    TAG3= '44s'
-    msg_header.append (struct.pack('>32sI4sI', pname, len(gname), mesgtype_str,data_len))
-
-    for g in gname:
-        msg_header.append(g)
-
-    tag = TAG3 + ('32s' * len(gname))
-    print 'MSG_TAG:', tag
-    #print 'hdr = ', msg_header
-    hdr += struct.pack(tag, *msg_header)
+    msg_hdr = struct.pack('>32sI4sI', pname, len(gname), mesgtype_str,data_len)
+    grp_tag  = '32s' * len(gname)
+    grp_hdr = struct.pack(grp_tag, *gname)
+    hdr = ''.join((svcType, msg_hdr, grp_hdr))
     return hdr
 
 def protocol_Connect(my_name, membership_notifications=True, priority_high=False):

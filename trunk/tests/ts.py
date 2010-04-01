@@ -22,8 +22,6 @@ for i in xrange(1, 49):
     if i % 10 == 2:
         sp.leave(['gr1'])
         sp.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff)
-#sp.leave(['gr1'])
-print 'Final receive: ', sp.receive(), sp.receive()
+sp.leave(['gr1'])
 sp.disconnect()
-#sp.disconnect()
 exit(0)

@@ -1,6 +1,34 @@
 #!/usr/bin/python
 import socket, struct, copy, asyncore, asynchat, time, Queue
 
+# basic API methods:
+#
+# Constructor: (myname, host, port)
+#
+# connect(want_membership_info, want_priority)
+#
+# join([groups])
+# - joins a list of groups
+#
+# leave([groups])
+# - leaves a list of groups
+#
+# multicast(message, groups[], mesg_type, svc_type)
+# - send off a message to one or more groups
+#
+# ping(callback, timeout, payload, mesg_type, svc_type)
+# - sends a message to my connections' private name and ensures it
+# is received.
+#
+# optimized methods:
+# a way to pre-generate as much of a header as possible for a given
+# set of groups plus the mesgtype, maybe it's a class that produces
+# byte strings (header+payload) when you pass a payload into a
+# method.
+#
+#
+
+
 class SpreadMessage(object):
     UNRELIABLE_MESS = 0x00000001
     RELIABLE_MESS = 0x00000002
@@ -42,6 +70,12 @@ class AsyncSpread(asynchat.async_chat):
         self.queue_in = Queue.Queue()
         # queue_out is for data destined to go OUT the socket
         self.queue_out = Queue.Queue()
+        # optimizations:
+        try:
+            _struct_hdr = struct.Struct(SpreadMessage.HEADER_FMT) # py2.5 only
+            self.struct_hdr = _struct_hdr.unpack
+        except:
+            self.struct_hdr = self._unpack_header()
         #
         self.msg_count = 0
         self.membership_notifications = membership_notifications
@@ -52,9 +86,14 @@ class AsyncSpread(asynchat.async_chat):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.connect((host, port))
 
+    def _unpack_header(self, payload):
+        '''used for python < 2.5 where the struct module doesn't offer the
+        more optimized struct.Struct class for holding pre-compiled struct formats.'''
+        return struct.unpack(SpreadMessage.HEADER_FMT, payload)
+
     def handle_connect(self):
         print 'Got connection to server!'
-        msg_connect = protocol_Connect(self.name, self.priority_high)
+        msg_connect = protocol_Connect(self.name, self.membership_notifications, self.priority_high)
         self.wait_bytes(1, self.st_auth_read)
         print 'STATE = ST_INIT'
         self.push(msg_connect)
@@ -150,57 +189,57 @@ class AsyncSpread(asynchat.async_chat):
         #print 'STATE: st_read_header'
         ENDIAN_TEST = 0x80000080
         recv_head = data
-        (svcType, sender, numGroups, mesgType, mesg_len) = struct.unpack(SpreadMessage.HEADER_FMT, recv_head)
+        (svc_type, sender, num_groups, mesg_type, mesg_len) = self.struct_hdr(recv_head)
         self.this_sender = sender
-        #print 'Svc type: %x  mesgType: %x' % (svcType, mesgType)
-        endianWrong = (svcType & ENDIAN_TEST) == 0
-        svcType &= ~ENDIAN_TEST
-        #print 'Svc Type Endian wrong?:', endianWrong, 'svcType in hex = %x' % (svcType)
-        if endianWrong:
-            print 'Svc type: %x' % (svcType)
+        #print 'Svc type: %x  mesg_type: %x' % (svc_type, mesg_type)
+        endian_wrong = (svc_type & ENDIAN_TEST) == 0
+        svc_type &= ~ENDIAN_TEST
+        self.this_svcType = svc_type
+        mesg_type = mesg_type >> 8
+        self.this_mesgType = mesg_type
+        self.this_mesg_num_groups = num_groups
+        self.this_mesg_len = mesg_len
+        #print 'Svc Type Endian wrong?:', endianWrong, 'svc_type in hex = %x' % (svc_type)
+        if endian_wrong:
+            print 'Svc type endianness-corrected: %x' % (svc_type)
         reg_message = False
-        if svcType & SpreadMessage.REGULAR_MESS:
-            #print 'SPREAD-MESSAGE:  Regular message'
-            reg_message = True
-        elif svcType & SpreadMessage.REG_MEMB_MESS:
+        if svc_type & SpreadMessage.REGULAR_MESS:
+            self.this_reg_message = True
+        elif svc_type & SpreadMessage.REG_MEMB_MESS:
+            self.this_reg_message = False
             print 'SPREAD-MESSAGE: >>>>> Membership message <<<<<'
-            if svcType & SpreadMessage.CAUSED_BY_JOIN:
+            if svc_type & SpreadMessage.CAUSED_BY_JOIN:
                 print '  CAUSED BY JOIN   <<<<<'
-            if svcType & SpreadMessage.CAUSED_BY_LEAVE:
+            if svc_type & SpreadMessage.CAUSED_BY_LEAVE:
                 print '  CAUSED BY LEAVE   <<<<<'
-            if svcType & SpreadMessage.CAUSED_BY_NETWORK:
+            if svc_type & SpreadMessage.CAUSED_BY_NETWORK:
                 print '  CAUSED BY NETWORK   <<<<<'
-            if svcType & SpreadMessage.CAUSED_BY_DISCONNECT:
+            if svc_type & SpreadMessage.CAUSED_BY_DISCONNECT:
                 print '  CAUSED BY DISCONNECT   <<<<<'
-        mesgType = mesgType >> 8
-        self.this_svcType = svcType
-        self.this_reg_message = reg_message
-        self.this_mesgType = mesgType
-        #print 'Hint/mesgType:', mesgType, ' and in hex = %x' % (mesgType)
-        gr_left = numGroups
-        # read gr_len * SpreadMessage.MAX_GROUP_LEN
-        self.this_num_groups = numGroups
-        self.this_mesg_len = ord(data[-4])
-        self.wait_bytes(numGroups * SpreadMessage.MAX_GROUP_LEN, self.st_read_groups)
+        else:
+            pass # unknown message type, interesting.
+        # what if num_groups is zero?  need to handle that specially?
+        if num_groups > 0:
+            self.wait_bytes(num_groups * SpreadMessage.MAX_GROUP_LEN, self.st_read_groups)
+        else:
+            print 'ZERO groups for this message.  Need callback here.'
+            self.wait_bytes(48, self.st_read_header)
 
     def st_read_groups(self, data):
         #print 'STATE: st_read_groups'
-        maxg = SpreadMessage.MAX_GROUP_LEN
-        groups = []
-        i = 0
-        while self.this_num_groups > 0:
-            x = data[(i*maxg):(i+1)*maxg]
-            if '\x00' in x:
-                x = x[0:x.index('\x00')]
-            groups.append(x)
-            i += 1
-            self.this_num_groups -= 1
-        #print 'Sender: \'%s\'   Groups: %s' % (self.this_sender, groups)
+        group_field = '%ds' % SpreadMessage.MAX_GROUP_LEN
+        group_packer = group_field * self.this_mesg_num_groups
+        groups_padded = struct.unpack(group_packer, data)
+        groups = [ g[0:g.index('\x00')] for g in groups_padded ] # trim padded nulls
+        self.this_mesg_groups = groups
         mesg_len = self.this_mesg_len
-        #print 'Message Type: %d   Message Length: %d' % (self.this_mesgType, mesg_len)
+        print 'Mesg Type:%d  Mesg Len:%d  Sender: \'%s\'  Groups: %s' % (self.this_mesgType, mesg_len, self.this_sender, groups)
+        # Simple protocol: if there's a payload, read it, otherwise wait for new message
         if mesg_len > 0:
             self.wait_bytes(mesg_len, self.st_read_message)
         else:
+            # call any callbacks here, to indicate membership changes and such
+            print 'NEED CALLBACK HERE'
             self.wait_bytes(48, self.st_read_header)
 
     def st_read_message(self, data):
@@ -208,8 +247,8 @@ class AsyncSpread(asynchat.async_chat):
         self.msg_count += 1
         if self.msg_count % 2000 == 0:
             print 'GOT MESSAGE %d, at %.1f msgs/second' % (self.msg_count, self.msg_count / (time.time() - self.start_time))
-        #if self.this_reg_message:
-        #    print 'GOT MESSAGE %d: ' % (self.msg_count), data
+        if self.this_reg_message:
+            print 'GOT MESSAGE %d: ' % (self.msg_count), data
         #else:
         #    print '<No message body>'
         self.wait_bytes(48, self.st_read_header)
@@ -235,7 +274,7 @@ class AsyncSpread(asynchat.async_chat):
         '''
         data_len = len(message)
         header = protocol_Create(ServiceTypes.SEND_PKT, mesgtype, self.private_name, groups, data_len)
-        payload = struct.pack('!%ss'%data_len,message)
+        payload = struct.pack('!%ss' % data_len, message)
         pkt = ''.join(header, payload)
         self.push(pkt)
 
@@ -247,16 +286,6 @@ class Spread(object):
         """
         Create a new Spread object.
 
-        @param sp_name: a string specifying the name under which this client is to be
-                        known; the default is a private name made up by Spread.
-                        The default is test.
-
-        @param sp_host: a string specifying the port and host of the spread daemon to use,
-                        of the form "<port>@<hostname>" or "<port>", where <port> is an
-                        integer port number (typically the constant DEFAULT_SPREAD_PORT)
-                        represented as a string, and <hostname> specifies the host where
-                        the daemon runs, typically "localhost".  The default is the
-                        default Spread port and host.
 
         >>> sp = Spread()
         >>> sp = Spread('test','4803@localhost')
@@ -268,12 +297,12 @@ class Spread(object):
         self.private_name = None
 
     def socket_send(self, data):
-        print '>> Writing %d bytes' % (len(data))
+#        print '>> Writing %d bytes' % (len(data))
         return self.sock.send(data)
 
     def socket_rec(self, want=1, timeout=None):
         got = 0
-        print '<< Reading %d bytes' % (want)
+#        print '<< Reading %d bytes' % (want)
         data = ''
         while got < want:
             ret = self.sock.recv(want-got)
@@ -491,64 +520,65 @@ class SpreadException(Exception):
         self.err_msg = SpreadException.errors.get(errno, 'unrecognized error')
         print self.err_msg
 
-class SpreadProto(object):
-    pass
-
 class ServiceTypes(object):
     JOIN = 0x00010000
     LEAVE = 0x020000
     KILL = 0x00040000
     SEND = 0x00000002
 
-    ENDIAN_TEST = 0x80000080
-
     JOIN_PKT = struct.pack('!I', JOIN)
     LEAVE_PKT = struct.pack('!I', LEAVE)
     KILL_PKT = struct.pack('!I', KILL)
     SEND_PKT = struct.pack('!I', SEND)
 
-serviceType_dic = {
-    'JOIN_MESS'  : [0,1,0,0],
-    'LEAVE_MESS' : [0,2,0,0],
-    'KILL_MESS'  : [0,4,0,0],
-    'SEND_MESS'  : [0,0,0,2],
-}
-TAG = '!4B32s12B%s'
-TAG2= '32s4s4s4s%s'
+
+#def make_header_fmt(num_groups):
+#    pack_str = '>32s4s4s4sIII' + ('32s' * num_groups)
+#    # err - middle 'I' needs to be little endian, and the rest, big-endian. weird.
+#    return pack_str
 
 # must optimize this more
-def protocol_Create(serType, mesgtype, pname, gname, data_len=0):
-    hdr = serType
-    msg_header = []
-    msg_header.append(pname)
+def protocol_Create(svcType, mesgtype, pname, gname, data_len=0):
+    hdr = svcType
+#    msg_header = []
+#    msg_header.append(pname)
+#    TAG3= '32s4s4s4s'
 
     # big endian
-    msg_header.append (struct.pack('>I', len(gname)))
+#    msg_header.append (struct.pack('>I', len(gname)))
+#    # little endian
+#    msg_header.append (struct.pack('<I', (mesgtype & 0xffff) << 8))
+#    # big endian
+#    msg_header.append (struct.pack('>I', data_len))
 
     # little endian
-    msg_header.append (struct.pack('<I', (mesgtype & 0xffff) << 8))
-
-    # big endian
-    msg_header.append (struct.pack('>I', data_len))
+    msg_header = []
+    mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
+    TAG3= '44s'
+    msg_header.append (struct.pack('>32sI4sI', pname, len(gname), mesgtype_str,data_len))
 
     for g in gname:
         msg_header.append(g)
 
-    tag = TAG2 % ('32s'*len(gname))
+    tag = TAG3 + ('32s' * len(gname))
     print 'MSG_TAG:', tag
-    print 'hdr = ', msg_header
+    #print 'hdr = ', msg_header
     hdr += struct.pack(tag, *msg_header)
     return hdr
 
-def protocol_Connect(connect_name, membership_notifications=True, priority_high=False):
-    name_len = len(connect_name)
+def protocol_Connect(my_name, membership_notifications=True, priority_high=False):
+    name_len = len(my_name)
     mem_opts = 0x00
     if membership_notifications:
-        mem_opts = mem_opts | 0x01
+        mem_opts |= 0x01
+        print 'WANT MEMBERSHIP MESSAGES'
     if priority_high:
-        mem_opts = mem_opts | 0x10
-    print 'join mem opts: 0x%x' % (mem_opts)
-    return struct.pack('!5B%ss' % name_len, 4, 1, 0, mem_opts, name_len, connect_name)
+        mem_opts |= 0x10
+    print 'Mem_opts: 0x%x' % mem_opts
+    connect_fmt = '!5B%ds' % name_len
+    print 'connect_fmt:', connect_fmt
+    print 'args', (4, 1, 0, mem_opts, name_len, my_name)
+    return struct.pack(connect_fmt, 4, 1, 0, mem_opts, name_len, my_name)
 
 
 if __name__ == '__main__':

@@ -16,3 +16,6 @@ Server sends:
 Client sends:
 || Auth response ||
 || 90 bytes ||
+
+Server sends:
+|| 

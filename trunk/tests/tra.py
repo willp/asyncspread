@@ -1,12 +1,12 @@
-#!/usr/bin/python
+#!/usr/bin/python2.4
 
 import asyncspread, time, sys
 
-myname = 'cli-%s' % (int(time.time()) % 100)
+myname = 'cli-%s' % (int(time.time()*10) % 1000)
 print 'I am', myname
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999)
-sp.loop(0.001)
-sp.join(['gr1'])
+sp.loop(0.1)
+sp.join(['gr1', 'gr2', 'abc123', 'def'])
 sp.loop()
 
 #sp.connect()

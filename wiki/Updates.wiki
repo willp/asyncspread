@@ -1,0 +1,9 @@
+#summary Updates from implementation
+
+= Latest News =
+
+I've made a lot of progress on the packet marshalling code, and I'm done converting the code to being completely non-blocking.  I'm pretty sure this code won't ever get out of sync with the server, now that it understands the header fields _much_ better.
+
+The API only exists as scribbles on a notepad, but I'm thinking it will support two modes of operation:
+  * Single-threaded: clients explicitly call a loop() method with a timeout parameter similar to asyncore.loop()
+  * Multi-threaded: a single background thread dealing with the IO by wrapping asyncore.loop() with a thread, and messages are enqueued and dequeued from two thread safe deque objects by the client.  I'm not 100% sure on the details yet.

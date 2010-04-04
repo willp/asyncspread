@@ -4,15 +4,14 @@ import asyncspread, time, sys
 
 myname = 'srv-%s' % (int(time.time()*10) % 1000)
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999)
-ret = sp.wait_for_connection(10)
+ret = sp.start_connect()
 print 'Connected?', ret
 print 'my private name is:',sp.private_name
 sp.join(['gr1', 'group2', 'gr2'])
-for i in xrange(1, 49):
-    sp.poll(30)
-    time.sleep(1)
+sp.loop(1)
+for i in xrange(1, 43):
     groups = ['gr1']
-    if i % 10 == 0:
+    if i % 5 == 0:
         groups.append('gr3')
         groups.append('gr4')
         groups.append('gr5')
@@ -24,6 +23,8 @@ for i in xrange(1, 49):
     if i % 10 == 2:
         sp.leave(['gr1'])
         sp.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff)
+    sp.loop(2)
+    time.sleep(1)
 sp.loop(10)
 sp.leave(['gr1'])
 sp.disconnect()

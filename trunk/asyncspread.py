@@ -52,35 +52,47 @@ class SpreadMessage(object):
     GROUP_FMT = '%ds' % MAX_GROUP_LEN
     HEADER_FMT = 'I%ssIII' % (MAX_GROUP_LEN)
 
-    def __init__(self, svc_type):
-        self.svc_type = svc_type
-        self.type_regular = self.type_membership = self.is_transitional = False
-        self.is_join = self.is_leave = False
-        self.cause_network = self.cause_disconnect = self.cause_join = self.cause_leave = False
+    def _parse_svc_type(self, svc_type):
+        # TODO: remove debug output here
         if svc_type & SpreadMessage.REGULAR_MESS:
             self.type_regular = True
         if self.svc_type & self.REG_OR_TRANS_MESS:
+            #print '>> Some kinda membership message << (-)'
             self.type_membership = True
             if self.svc_type & self.TRANSITION_MESS:
-                print '>> TRANSITIONAL MEMBERSHIP MESSAGE <<  (A)'
+                #print '>> TRANSITIONAL MEMBERSHIP MESSAGE <<  (A)'
                 self.is_transitional = True
         if self.svc_type & self.REG_MEMB_MESS:
-            print '>> REGULAR MEMBERSHIP MESSAGE <<  (B)'
+            #print '>> REGULAR MEMBERSHIP MESSAGE <<  (B)'
             self.is_membership = True
         if self.is_membership:
             if svc_type & self.CAUSED_BY_JOIN:
-                print '  CAUSED BY JOIN   <<<<<'
+                #print '  CAUSED BY JOIN   <<<<<'
                 self.cause_join = True
             if svc_type & self.CAUSED_BY_LEAVE:
-                print '  CAUSED BY LEAVE   <<<<<'
+                #print '  CAUSED BY LEAVE   <<<<<'
                 self.cause_leave = True
-            if svc_type & self.CAUSED_BY_NETWORK:
-                print '  CAUSED BY NETWORK   <<<<<'
-                self.cause_network = True
             if svc_type & self.CAUSED_BY_DISCONNECT:
-                print '  CAUSED BY DISCONNECT   <<<<<'
+                #print '  CAUSED BY DISCONNECT   <<<<<'
                 self.cause_disconnect = True
+            if svc_type & self.CAUSED_BY_NETWORK:
+                #print '  CAUSED BY NETWORK   <<<<<'
+                self.cause_network = True
 
+    def __init__(self, svc_type, mesg_type, sender, num_groups, mesg_len):
+        self.svc_type = svc_type
+        self.mesg_type = mesg_type
+        self.sender = sender
+        self.num_groups = num_groups
+        self.mesg_len = mesg_len
+        self.data = None
+        #
+        self.recv_time = time.time()
+        # now determine various properties from svc_type
+        self.type_regular = self.type_membership = self.is_transitional = False
+        self.is_join = self.is_leave = False
+        self.cause_network = self.cause_disconnect = self.cause_join = self.cause_leave = False
+        self._parse_svc_type(svc_type)
 
     def is_membership(self):
         return self.type_membership
@@ -88,43 +100,86 @@ class SpreadMessage(object):
 class SpreadGroup(object):
     def __init__(self, name):
         self.name = name
-        self.members = dict()
+        self.members = None
+
+    def update_members(self, membership):
+        '''Returns a tuple of two lists of (left, joined)'''
+        pass
+
+class ServiceTypes(object):
+    JOIN = 0x00010000
+    LEAVE = 0x020000
+    KILL = 0x00040000
+    SEND = 0x00000002
+
+    JOIN_PKT = struct.pack('!I', JOIN)
+    LEAVE_PKT = struct.pack('!I', LEAVE)
+    KILL_PKT = struct.pack('!I', KILL)
+    SEND_PKT = struct.pack('!I', SEND)
 
 
 class AsyncSpread(asynchat.async_chat):
 
-    def __init__(self, name, host, port, membership_notifications=True, priority_high=False):
+    def __init__(self, name, host, port,
+                 cb_dropped=None,
+                 cb_connected=None,
+                 cb_data=None,
+                 cb_membership=None,
+                 membership_notifications=True,
+                 priority_high=False,
+                 debug=False,
+                 log=None):
+        '''
+        Callback thoughts:
+        As an end-user, I want to get a callback whenever I get a message on a certain
+        group.  Also, I want to get membership change notifications as another callback.
+        '''
         asynchat.async_chat.__init__(self)
         self.name = name
         self.host = host
         self.port = port
+        self.membership_notifications = membership_notifications
+        self.priority_high = priority_high
+        self.debug = debug
+        self.log = log # not yet used
+        # optional args, callbacks
+        self.cb_connected = cb_connected
+        self.cb_dropped = cb_dropped
+        self.cb_data = cb_data
+        self.cb_membership = cb_membership
+        self.cb_by_group = dict() # per-group callbacks
+        #
         self.private_name = None
         self.start_time = time.time()
         self.ibuffer = ''
         self.ibuffer_start = 0
-        # queue_in is for messages read FROM the socket
-        # queue_out is for data destined to go OUT the socket
-        self.queue_in = deque()
-        self.queue_out = deque()
-        # Set up per-mesgtype callbacks
-        self.mesg_callbacks = [None] * (1<<16)
+        self.msg_count = 0
+        #
+        self.do_reflection = False # don't reflect my messages back to myself
+        self.reflected_drops = 0
+        # more settings
+        self.queue_joins = []
+        self.dead = False
+        self.need_bytes = 0
+###        # queue_in is for messages read FROM the socket
+###        # queue_out is for data destined to go OUT the socket
+###        self.queue_in = deque()
+###        self.queue_out = deque()
+###        # Set up per-mesgtype callbacks
+###        #self.mesg_callbacks = [None] * (1<<16) # not yet
         # group membership info here
         self.groups = dict()
-        print ' I have %d mesg_callbacks' % (len(self.mesg_callbacks))
         # optimizations:
         try:
             _struct_hdr = struct.Struct(SpreadMessage.HEADER_FMT) # py >= 2.5 only
             self.struct_hdr = _struct_hdr.unpack
-        except:
-            print 'using self._unpack_header instread of Struct object'
+        except: # py2.4 support here
             self.struct_hdr = self._unpack_header
-        #
-        self.msg_count = 0
-        self.membership_notifications = membership_notifications
-        self.priority_high = priority_high
-        self.queue_joins = []
-        self.dead = False
-        self.need_bytes = 0
+        # PING vars
+        # IDs for mapping pings back to requests (overkill, I know)
+        self.ping_callbacks = dict()
+        self.ping_id = 0
+        self.ping_mtype = 0xffff # set to None if you want to disable ping processing
 
     def start_connect(self, timeout=5):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -138,42 +193,70 @@ class AsyncSpread(asynchat.async_chat):
         return struct.unpack(SpreadMessage.HEADER_FMT, payload)
 
     def handle_connect(self):
-        print 'Got connection to server!'
         msg_connect = protocol_connect(self.name, self.membership_notifications, self.priority_high)
-        print 'STATE = ST_INIT'
         self.wait_bytes(1, self.st_auth_read)
         self.push(msg_connect)
 
     def handle_close(self):
         print 'CONNECTION CLOSED! LOST CONNECTION TO THE SERVER!'
         self.dead = True
+        self.private_name = None
         self.close()
+        if self.cb_dropped is not None:
+            self.cb_dropped(self)
 
-    def loop(self, count=None, timeout=0.1):
-        print 'Entering main loop'
+    def loop(self, count=None, timeout=0.1, expire_every=10):
         main_loop = 0
+        ping_loop = 0
+        self._check_timeouts()
         while not self.dead and (count is None or main_loop < count):
             main_loop += 1
-            #if count is not None:
-            #    print 'main loop:', main_loop
+            ping_loop += 1
             asyncore.loop(timeout=timeout, count=1)
             if self.private_name is not None and len(self.queue_joins) > 0:
-                print 'Joining >pending< groups', self.queue_joins
+                if self.debug:
+                    print 'Joining >pending< groups', self.queue_joins
                 q_groups = self.queue_joins
                 self.queue_joins = []
                 self.join(q_groups)
+            # every N iterations, check for timed out pings
+            if expire_every and ping_loop >= expire_every:
+                ping_loop = 0
+                self._check_timeouts()
 
     def poll(self, timeout=0.001):
         if self.dead:
             raise(IOError('Connection lost to server'))
         asyncore.loop(timeout=timeout, count=1)
 
-    def wait_for_connection(self, timeout=10):
+    def add_group_callback(self, group, cb_data, cb_membership=None):
+        self.cb_by_group[group] = (cb_data, cb_membership)
+
+    def wait_for_connection(self, timeout=10, sleep_delay=0.1):
+        '''Spend time in self.poll() until the timeout expires, or we are connected, whichever first.
+        Return boolean indicating if we are connected yet.  Or not.'''
         time_end = time.time() + timeout
         while not self.private_name and time.time() < time_end:
             self.poll(timeout/100)
-            time.sleep(0.1)
+            time.sleep(sleep_delay)
         return self.private_name is not None
+
+    def _check_timeouts(self):
+        timeouts = []
+        now = time.time()
+        for ping_id, cb_items in self.ping_callbacks.iteritems():
+            (cb, time_sent, timeout) = cb_items
+            expire = time_sent + timeout
+            if now >= expire:
+                if self.debug:
+                    print 'EXPIRING ping id %d because now %.4f is > expire %.4f' % (ping_id, now, expire)
+                timeouts.append(ping_id)
+        for ping_id in timeouts:
+            (cb, time_sent, timeout) = self.ping_callbacks.pop(ping_id)
+            elapsed = now - time_sent
+            try:
+                cb(False, elapsed)
+            except: pass
 
     def collect_incoming_data(self, data):
         '''Buffer the data'''
@@ -192,13 +275,11 @@ class AsyncSpread(asynchat.async_chat):
         need_bytes = int(need_bytes) # py 2.4 fixup for struct.unpack()'s longs not satisfying isinstance(int)
         self.need_bytes = need_bytes
         self.next_state = next_state
-        #print '... will wait for %d bytes then will call %s' % (need_bytes, next_state)
         self.set_terminator(need_bytes)
 
     def st_auth_read(self, data):
-        print 'STATE = ST_AUTH_READ'
+        #print 'STATE = ST_AUTH_READ'
         (authlen,) = struct.unpack('b', data)
-        print 'Authlen:', authlen
         if authlen < 0:
             print 'FAILED AUTHENTICATION TO SERVER: name collision?'
             self.dead = True
@@ -208,60 +289,65 @@ class AsyncSpread(asynchat.async_chat):
         self.wait_bytes(authlen, self.st_auth_process)
 
     def st_auth_process(self, data):
-        print 'STATE: st_auth_process, len(data):',len(data), 'data:', data
+        #print 'STATE: st_auth_process, len(data):',len(data), 'data:', data
         methods= data.rstrip().split(' ') # space delimited?
         #print 'supported auth methods:', methods
         if 'NULL' not in methods: # add 'IP' support at some point
             print 'ERROR, cannot handle non-NULL authentication: "%s"' % (data)
             self.dead = True
             self.close()
-            return False
+            return
         msg_auth = struct.pack('90s', 'NULL')
         self.wait_bytes(1, self.st_read_session)
         self.push(msg_auth)
-        return True
+        return
 
     def st_read_session(self, data):
-        print 'STATE: st_read_session.'
-        accept, = struct.unpack('b', data)
-        #print 'accept:', accept
+        #print 'STATE: st_read_session.'
+        (accept,) = struct.unpack('b', data)
         if accept != 1:
             print 'Failed authentication / connection:', accept
+            self.dead = True
             self.close()
             raise SpreadException(accept)
         self.wait_bytes(3, self.st_read_version)
 
     def st_read_version(self, data):
-        print 'STATE: st_read_version'
+        if self.debug:
+            print 'STATE: st_read_version'
         (majorVersion, minorVersion, patchVersion) = struct.unpack('BBB', data)
         #print 'Server version: %d.%d.%d' % (majorVersion, minorVersion, patchVersion)
         version = (majorVersion | minorVersion | patchVersion)
-        if version == -1: # when does this happen?
+        if version == -1: # when does this happen? does it?
+            self.dead = True
             self.close()
             raise SpreadException(version)
         self.server_version = (majorVersion, minorVersion, patchVersion)
-        self.wait_bytes(1, self.st_read_grouplen)
+        self.wait_bytes(1, self.st_read_private_name)
 
-    def st_read_grouplen(self, data):
-        print 'STATE: st_read_grouplen'
+    def st_read_private_name(self, data):
+        if self.debug:
+            print 'STATE: st_read_private_name'
         (group_len,) = struct.unpack('b', data)
         if group_len == -1:
+            self.dead = True
             self.close()
             raise SpreadException(group_len)
-        #print 'Private group name length is:', group_len
         self.wait_bytes(group_len, self.st_set_private)
 
     def st_set_private(self, data):
-        print 'STATE: st_set_private'
+        if self.debug:
+            print 'STATE: st_set_private'
         self.private_name = data
-        print 'My private name is:', self.private_name
+        if self.cb_connected is not None:
+            self.cb_connected(self)
         self.wait_bytes(48, self.st_read_header)
 
     def st_read_header(self, data):
-        print '\nSTATE: st_read_header'
+        if self.debug:
+            print '\nSTATE: st_read_header'
         ENDIAN_TEST = 0x80000080
         (svc_type, sender, num_groups, mesg_type, mesg_len) = self.struct_hdr(data)
-        #(svc_type, sender, num_groups, mesg_type, mesg_len) = struct.unpack(SpreadMessage.HEADER_FMT, data)
         #print 'unpacked header',(svc_type, sender, num_groups, mesg_type, mesg_len)
         # TODO: add code to flip endianness if necessary
         endian_wrong = (svc_type & ENDIAN_TEST) == 0
@@ -272,104 +358,142 @@ class AsyncSpread(asynchat.async_chat):
         tail_null = sender.find('\x00')
         if tail_null >= 0:
             sender = sender[0:tail_null]
-        print 'Svc type: 0x%04x  sender="%s"  mesg_type: 0x%08x   num_groups: %d   mesg_len: %d' % (svc_type, sender, mesg_type, num_groups, mesg_len)
+        if self.debug:
+            print 'Svc type: 0x%04x  sender="%s"  mesg_type: 0x%08x   num_groups: %d   mesg_len: %d' % (svc_type, sender, mesg_type, num_groups, mesg_len)
         # build up the SpreadMessage object
-        this_mess = SpreadMessage(svc_type)
-        this_mess.sender = sender
-        this_mess.num_groups = num_groups
-        this_mess.mesg_len = mesg_len
-        this_mess.mesg_type = mesg_type
-        self.this_mess = this_mess
+        this_mesg = SpreadMessage(svc_type, mesg_type, sender, num_groups, mesg_len)
+        self.this_mesg = this_mesg
         #
         self.this_svcType = svc_type
-        if this_mess.type_membership:
+        if this_mesg.type_membership:
             self.this_reg_message = False
-            print 'MEMB>>!! sender="%s"  num_groups: %d ' % (sender, num_groups)
+            if self.debug:
+                print 'MEMB>>!! sender="%s"  num_groups: %d ' % (sender, num_groups)
         else:
             # data message!
-            print 'DATA>>!! svc_type:', svc_type, 'and in hex: 0x%04x' % svc_type
-        print '> mesg_type = %d and hex 0x%04x' % (mesg_type, mesg_type)
-        print '> sender="%s"  num_groups: %d   mesg_len:%d' % (sender, num_groups, mesg_len)
+            if self.debug:
+                print 'DATA>>!! svc_type:', svc_type, 'and in hex: 0x%04x' % svc_type
+        if self.debug:
+            print '> mesg_type = %d and hex 0x%04x' % (mesg_type, mesg_type)
+            print '> sender="%s"  num_groups: %d   mesg_len:%d' % (sender, num_groups, mesg_len)
         # what if num_groups is zero?  need to handle that specially?
         if num_groups > 0:
             self.wait_bytes(num_groups * SpreadMessage.MAX_GROUP_LEN, self.st_read_groups)
-            return True
+            return
         print 'ZERO groups for this message.  Need callback here.'
         if mesg_len > 0:
             print 'Waiting for PAYLOAD on zero-group mesg (membership notice?) payload len=%d' % (mesg_len)
             self.wait_bytes(mesg_len, self.st_read_message)
-            return True
+            return
         self.wait_bytes(48, self.st_read_header)
-        return True
+        return
 
     def st_read_groups(self, data):
         #print 'STATE: st_read_groups'
-        this_mess = self.this_mess
-        group_packer = SpreadMessage.GROUP_FMT * this_mess.num_groups # could pre-calcualte this if necessary
+        this_mesg = self.this_mesg
+        group_packer = SpreadMessage.GROUP_FMT * this_mesg.num_groups # could pre-calcualte this if necessary
         groups_padded = struct.unpack(group_packer, data)
-        groups = [ g[0:g.find('\x00')] for g in groups_padded ] # trim padded nulls. use find() instead of index() to avoid exceptions.
-        this_mess.groups = groups
-        mesg_len = this_mess.mesg_len
-        print 'Mesg Type:%d(0x%04x)  Mesg Len:%d  Sender: \'%s\'  Groups: %s' % (this_mess.mesg_type, this_mess.mesg_type, mesg_len, this_mess.sender, groups)
+        groups = grouplist_trim(groups_padded)
+        #groups =  # trim padded nulls. use find() instead of index() to avoid exceptions.
+        this_mesg.groups = groups
+        mesg_len = this_mesg.mesg_len
+        if self.debug:
+            print 'Mesg Type:%d(0x%04x)  Mesg Len:%d  Sender: \'%s\'  Groups: %s' % (this_mesg.mesg_type, this_mesg.mesg_type, mesg_len, this_mesg.sender, groups)
         # Simple protocol: if there's a payload, read it, otherwise wait for new message
         if mesg_len > 0:
-            if this_mess.type_membership:
+            if this_mesg.type_membership:
                 self.wait_bytes(mesg_len, self.st_read_memb_change)
-                return True
+                return
             self.wait_bytes(mesg_len, self.st_read_message)
-            return True
+            return
         # this condition never happens...  hm!
         # call any callbacks here, to indicate membership changes and such
         print 'NEED CALLBACK HERE'
         self.wait_bytes(48, self.st_read_header)
-        return True
+        return
 
     def st_read_message(self, data):
-        print 'STATE: st_read_message'
+        if self.debug:
+            print 'STATE: st_read_message'
         self.msg_count += 1
-        this_mess = self.this_mess
+        self.wait_bytes(48, self.st_read_header) # always going to a new message next
+        this_mesg = self.this_mesg
+        this_mesg.data = data
         if self.msg_count % 2000 == 0:
             print 'GOT MESSAGE %d, at %.1f msgs/second' % (self.msg_count, self.msg_count / (time.time() - self.start_time))
-        print 'GOT MESSAGE %d (%d bytes): ' % (self.msg_count, len(data)), data
+        print 'GOT MESSAGE (mtype:0x%04x) %d (%d bytes): ' % (this_mesg.mesg_type, self.msg_count, len(data)), data
         # Callback time
         # if the destination group is my private name, then send this back to a unicast-receiver method
         # otherwise, need to send this back to a group-based receiver
         # can have a couple of ways of doing this: explode out messages sent to multiple groups to multiple
         # callbacks?  or maybe even
         # Detect a ping to myself
-        if this_mess.sender == self.private_name:
-            print 'PING RECEIVED BACK TO MYSELF.'
-            (head, timestamp) = data.split(':')
-            print 'Round trip time: %.8f seconds' % ( time.time() - float(timestamp) )
-        else:
-            print 'Sender = "%s"    My private name:"%s"  %d == %d' % (this_mess.sender, self.private_name, len(this_mess.sender), len(self.private_name))
-        self.wait_bytes(48, self.st_read_header)
+        if this_mesg.sender == self.private_name:
+            # message to myself!
+            if this_mesg.mesg_type == self.ping_mtype:
+                #print 'PING RECEIVED BACK TO MYSELF:', data
+                (head, ping_id, timestamp) = data.split(':')
+                ping_id = int(ping_id)
+                elapsed = time.time() - float(timestamp)
+                #print 'Round trip time: %.8f seconds' % ( elapsed )
+                # Now, a delayed ping may have been expired! need to handle that
+                if ping_id not in self.ping_callbacks:
+                    print 'LATE PING ARRIVED, Elapsed:', elapsed
+                    return
+                else:
+                    (ping_cb, send_time, timeout) = self.ping_callbacks.pop(ping_id)
+                    ping_cb (True, elapsed)
+                    return
+            # else, this is a reflection of my own message back to me... Probably best NOT to deliver this back to myself
+            # but make it configurable...
+            if not self.do_reflection:
+                self.reflected_drops += 1
+                #print 'Reflected drops:', self.reflected_drops
+                return
+        # else, this is a message we need to send to a user callback
+        if self.debug:
+            print 'Sender = "%s"    My private name:"%s"  %d == %d' % (this_mesg.sender, self.private_name, len(this_mesg.sender), len(self.private_name))
+        if self.cb_data:
+            self.cb_data(this_mesg)
+        for g in this_mesg.groups:
+            group_cbs = self.cb_by_group.get(g, None)
+            if group_cbs:
+                (data_cb, memb_cb) = group_cbs
+                #print 'Invoking per-group callback for group "%s"' % (g)
+                data_cb(this_mesg)
 
     def st_read_memb_change(self, data):
-        print 'STATE: st_read_memb_change():, data=', data, 'len(data)=%d' % (len(data))
+        if self.debug:
+            print 'STATE: st_read_memb_change():, data=', data, 'len(data)=%d' % (len(data))
         self.msg_count += 1
-        this_mess = self.this_mess
-        group = this_mess.sender
-        print 'GOT Membership MESSAGE about group "%s" number %d (%d bytes): ' % (group, self.msg_count, len(data)), data
-        if this_mess.cause_network:
+        self.wait_bytes(48, self.st_read_header) # always
+        this_mesg = self.this_mesg
+        group = this_mesg.sender
+        print 'GOT Membership MESSAGE about group "%s" number %d (%d bytes): ' % (group, self.msg_count, len(data))
+        # Ok, this is bad boilerplate here
+        if this_mesg.cause_network:
             #if len(data) >= 24:
             #    change_fmt = '>IIIIII%ds' % (len(data) - 24)
             #    (w1, w2, w3, w4, w5, w6, who) = struct.unpack(change_fmt, data)
             #    print 'DECODED Membership info:  ',(w1, w2, w3, w4, w5, w6, who)
             #    print 'DECODED Membership info:  (0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x, "%s")' % (w1, w2, w3, w4, w5, w6, who)
             print 'NETWORK CHANGE DETECTED'
-            self.update_group_membership(group, this_mess.groups)
-        elif this_mess.cause_join:
+            self.update_group_membership(group, this_mesg.groups)
+        elif this_mesg.cause_join:
             # then
             print 'JOIN DETECTED:'
-            self.update_group_membership(group, this_mess.groups)
-        elif this_mess.cause_leave:
+            self.update_group_membership(group, this_mesg.groups)
+        elif this_mesg.cause_leave:
             print 'LEAVE DETECTED:'
-            self.update_group_membership(group, this_mess.groups)
-        elif this_mess.cause_disconnect:
+            self.update_group_membership(group, this_mesg.groups)
+        elif this_mesg.cause_disconnect:
             print 'DISCONNECT DETECTED:'
-            self.update_group_membership(group, this_mess.groups)
-        self.wait_bytes(48, self.st_read_header)
+            self.update_group_membership(group, this_mesg.groups)
+        if self.cb_membership is not None:
+            try:
+                self.cb_membership(group) # TODO: FIXME! Bad calling args. Figure them out.
+            except:
+                pass
 
     # only works after getting connected
     def join(self, groups):
@@ -391,7 +515,6 @@ class AsyncSpread(asynchat.async_chat):
         self.push(send_head)
         self.dead = True
         self.close()
-        print 'Disconnected!'
         return True
 
     def multicast(self, groups, message, mesg_type):
@@ -406,7 +529,7 @@ class AsyncSpread(asynchat.async_chat):
         @type mesg_type: int (short int)
         '''
         if self.private_name is None:
-            print 'WARNING: no private channel name known yet from server... Failed MULTICAST message'
+            print 'WARNING: no private channel name known yet from server... Failed message'
             return False
         #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
         data_len = len(message)
@@ -417,30 +540,18 @@ class AsyncSpread(asynchat.async_chat):
         return True
 
     def unicast(self, group, message, mesg_type):
-        '''
-        Send a message to a single member.
+        '''alias for multicasting to a single group'''
+        return self.multicast([group], message, mesg_type)
 
-        @param group: group
-        @type group: string
-        @param message: data payload
-        @type message: string
-        @param mesg_type: numeric message type, must fit in 16 bits
-        @type mesg_type: int (short int)
-        '''
-        if self.private_name is None:
-            print 'WARNING: no private channel name known yet from server... Failed MULTICAST message'
-            return False
-        #print 'unicast(group=%s, message=%s, mesg_type=%d)' % (group, message, mesg_type)
-        data_len = len(message)
-        header = protocol_create(ServiceTypes.SEND_PKT, mesg_type, self.private_name, [group], data_len)
-        payload = struct.pack('%ss' % data_len, message)
-        pkt = ''.join((header, payload))
-        self.push(pkt)
-        return True
-
-    def ping(self, payload='PING:%.8f', mesg_type=0):
-        print 'Sending PING to myself'
-        payload = payload % (time.time())
+    def ping(self, callback, timeout=30):
+        if self.debug:
+            print 'Sending PING to myself'
+        payload='PING:%d:%.8f'
+        this_id = self.ping_id
+        self.ping_id += 1 # not thread-safe here
+        payload = payload % (this_id, time.time())
+        mesg_type = 0xffff
+        self.ping_callbacks[this_id] = (callback, time.time(), timeout)
         self.unicast(self.private_name, payload, mesg_type)
 
     def update_group_membership(self, group, membership):
@@ -448,7 +559,7 @@ class AsyncSpread(asynchat.async_chat):
         print '  members:', membership
         if not self.groups.has_key(group):
             # new group!
-            print 'FIRST JOIN!'
+            #print 'FIRST JOIN!'
             self.groups[group] = set(membership) # turn into a set()
             print 'Group Update callback needed here'
             return
@@ -474,9 +585,8 @@ class AsyncSpread(asynchat.async_chat):
 
 
 class SpreadException(Exception):
-    errors = {
-        0: 'unrecognized error',
-        -1: 'ILLEGAL_SPREAD',
+    '''SpreadException class from pyspread code by Quinfeng.'''
+    errors = {-1: 'ILLEGAL_SPREAD',
         -2: 'COULD_NOT_CONNECT',
         -3: 'REJECT_QUOTA',
         -4: 'REJECT_NO_NAME',
@@ -492,24 +602,12 @@ class SpreadException(Exception):
         -15: 'BUFFER_TOO_SHORT',
         -16: 'GROUPS_TOO_SHORT',
         -17: 'MESSAGE_TOO_LONG',
-        -18: 'NET_ERROR_ON_SESSION'
-    }
+        -18: 'NET_ERROR_ON_SESSION' }
 
     def __init__(self, errno):
         Exception.__init__(self)
         self.err_msg = SpreadException.errors.get(errno, 'unrecognized error')
         print 'SpreadException: %s' % (self.err_msg)
-
-class ServiceTypes(object):
-    JOIN = 0x00010000
-    LEAVE = 0x020000
-    KILL = 0x00040000
-    SEND = 0x00000002
-
-    JOIN_PKT = struct.pack('!I', JOIN)
-    LEAVE_PKT = struct.pack('!I', LEAVE)
-    KILL_PKT = struct.pack('!I', KILL)
-    SEND_PKT = struct.pack('!I', SEND)
 
 
 def make_header_fmt(num_groups):
@@ -537,6 +635,9 @@ def protocol_connect(my_name, membership_notifications=True, priority_high=False
     #print 'connect_fmt:', connect_fmt, 'args', (4, 1, 0, mem_opts, name_len, my_name)
     return struct.pack(connect_fmt, 4, 1, 0, mem_opts, name_len, my_name)
 
+def grouplist_trim(groups):
+    '''Trim padded nulls from list of fixed-width strings, return as new list'''
+    return [ g[0:g.find('\x00')] for g in groups ]
 
 if __name__ == '__main__':
     pass

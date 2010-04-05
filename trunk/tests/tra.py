@@ -1,16 +1,24 @@
 #!/usr/bin/python2.4
-
 import asyncspread, time, sys
+
+
+def ping_response(success, elapsed):
+    print 'Client PING callback: Success=', success
+    print '   Elapsed time: %.8f' % (elapsed)
+
+
+def mesg_cb(mesg):
+    print '*** Got message:', mesg.data
 
 myname = 'cli-%06d' % (int(time.time()*100) % 1000)
 print 'I am', myname
 #myname = ''
-sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999)
+sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data = mesg_cb)
 sp.start_connect()
 sp.join(['gr1', 'gr2', 'abc123', 'def'])
 while True:
     print 'client top of loop'
-    sp.ping()
+    sp.ping(ping_response)
     sp.loop(100)
 
 #sp.connect()

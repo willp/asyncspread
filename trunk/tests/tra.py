@@ -19,7 +19,7 @@ sp.join(['gr1', 'gr2', 'abc123', 'def'])
 while True:
     print 'client top of loop'
     sp.ping(ping_response)
-    sp.loop(100)
+    sp.loop(300)
 
 #sp.connect()
 #sp.join(['gr1', 'gr2', 'gr3', 'group1', 'group2', 'group3'])

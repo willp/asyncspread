@@ -11,7 +11,7 @@ def g3_cb(mesg):
     print '*** g3 got callback data:\n::', mesg.data, '\nwhich was sent to groups::', mesg.groups
 
 myname = 'srv-%s' % (int(time.time()*10) % 1000)
-sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data=mesg_cb)
+sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data=mesg_cb, debug=False)
 sp.add_group_callback('gr3', g3_cb)
 ret = sp.start_connect()
 

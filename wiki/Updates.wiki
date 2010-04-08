@@ -2,6 +2,23 @@
 
 = Latest News =
 
+April 7, 2010
+
+I'm again refactoring the code, to really clean up the message class.  The 'canonical' Java API for Spread has an extremely weak SpreadMessage class, and I realized that I was starting to mimic it for no good reason.  It is weak because a SpreadMessage object doesn't actually map to the _type_ of Spread message that it represents.  It is an unholy mess of boolean methods that you must query to determine what actual type of message you're dealing with.  And it also supports lots of methods that don't make any sense for a SpreadMessage of certain types.  For example, the getMembershipInfo() method exists for all SpreadMessage objects, but it is only valid when isMembership() returns True.  Otherwise, the result is undefined.
+
+It looks like what's needed here is a tiny bit of class inheritance.  And I usually shy away from introducing layers of inheritance out of abject worship of simplicity, but here it just makes perfect sense.  There really are types of messages:  SpreadMessage -> (DataMessage, MembershipMessage, TransitionalMessage)  and MembershipMessage -> (JoinMessage, LeaveMessage, NetworkMessage).  It's not a deep hierarchy, and the basemost class will be pretty tiny.  I'm adding a MessageFactory class to deal with the appropriate creation of these objects from parsed spread messages (packets), which also seems to be a common use-case for a message factory pattern.  I am keeping a close eye on the efficiency, so that DataMessage objects are inexpensive.  This is where I think using python slots may help.
+
+Once I get the MessageFactory ironed out and the individual classes wired up for the various message types, then I intend on refactoring the dispatch code that currently lives inside AsyncSpread's st_read_message() and st_read_groups() methods.  It's ridiculously overly complicated right now, so what I need to do is pull it apart a little bit, and let the code separate out into more uniform pieces.  Specifically, the AsyncSpread class will allow you to register a listener callback for various Spread message types, (DataMessage and MembershipMessage being the two big ones).  Those callbacks will then be able to deal with different message types without having to go through the rigamarole of testing isMembership(), isRegular(), causedByJoin(), causedByNetwork(), etc.  Instead, the methods can immediately implement the exact code needed to deal with that specific type of message.
+
+Only at _this_ point is where it makes any sense to process callbacks for data messages, versus callbacks for membership-change messages.  It's not really rocket science, just moving some deeply nested and redundant code out of the st_read_message() and st_read_groups() methods that currently live in AsyncSpread.  This opens up a much cleaner API for implementing different types of message dispatch strategies.  For example, one client may need to map a received message to a specific handler based entirely on the group it was sent on.  Other clients may need to include the 16-bit message-type header value as part of the message call dispatching, to route a message to an application-specific handler method.  Yet another client might not care at all about which groups a message was sent to, or what the message-type is set to, so a single data message handler is all that is required.  Or suppose a client only needs to care about membership messages, and needs to discard all DataMessages.  This is where it makes a lot of sense to me, at least, to break apart the message->code routing into another layer.  I suspect I'll end up implementing a few different MessageDispatcher classes that implement convenient APIs for each of the use-cases I just described.
+
+So, that's what's going on now.  I probably typed more characters describing the changes than the code will sum up to.  To sum up, for poor grammar's sake, a preposition is what I will end with.
+
+
+= Recent News =
+
+March 31, 2010
+
 I've made a lot of progress on the packet marshalling code, and I'm done converting the code to being completely non-blocking.  I'm pretty sure this code won't ever get out of sync with the server, now that it understands the header fields _much_ better.
 
 The API only exists as scribbles on a notepad, but I'm thinking it will support two modes of operation:

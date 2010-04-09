@@ -29,11 +29,52 @@ from collections import deque
 #
 #
 
+class ServiceTypes(object):
+    # Classes of service:
+    UNRELIABLE_MESS = 0x00000001
+    RELIABLE_MESS = 0x00000002
+    FIFO_MESS  = 0x00000004
+    CAUSAL_MESS = 0x00000008
+    AGREED_MESS = 0x00000010
+    SAFE_MESS  = 0x00000020
+
+    # Message Actions
+    JOIN = 0x00010000
+    LEAVE = 0x020000
+    KILL = 0x00040000
+    SEND = 0x00000002
+    SELF_DISCARD = 0x00000040 # A flag to disable refelction back of one's own message
+    SEND_NOREFLECT = SEND | SELF_DISCARD
+
+    # Message Types
+    REGULAR_MESS = 0x0000003f
+    REG_MEMB_MESS = 0x00001000
+    TRANSITION_MESS = 0x00002000
+    MEMBERSHIP_MESS = 0x00003f00
+
+    # Membership Change Reasons
+    CAUSED_BY_JOIN = 0x00000100
+    CAUSED_BY_LEAVE = 0x00000200
+    CAUSED_BY_DISCONNECT = 0x00000400
+    CAUSED_BY_NETWORK = 0x00000800
+
 class SpreadProto(object):
     MAX_GROUP_LEN = 32
-    GROUP_FMT = '%ds' % MAX_GROUP_LEN
+    GROUP_FMT = '%ds' % (MAX_GROUP_LEN)
     HEADER_FMT = 'I%ssIII' % (MAX_GROUP_LEN)
 
+    # Pre-create some format strings
+    # don't send to more than MAX_GROUPS groups at once, increase if necessary
+    MAX_GROUPS = 1000
+    GROUP_FMTS = [ GROUP_FMT * i for i in xrange(MAX_GROUPS) ]
+    # This list will consume 1000*3 = 3 KB, plus overhead.  Worth it to spend the RAM.
+
+    # Encoded message headers
+    JOIN_PKT = struct.pack('!I', ServiceTypes.JOIN)
+    LEAVE_PKT = struct.pack('!I', ServiceTypes.LEAVE)
+    KILL_PKT = struct.pack('!I', ServiceTypes.KILL)
+    SEND_PKT = struct.pack('!I', ServiceTypes.SEND)
+    SEND_SELFDISCARD_PKT = struct.pack('!I', ServiceTypes.SEND | ServiceTypes.SELF_DISCARD)
 
 class SpreadMessage(object):
     # Classes of service:
@@ -57,37 +98,36 @@ class SpreadMessage(object):
     CAUSED_BY_DISCONNECT = 0x00000400
     CAUSED_BY_NETWORK = 0x00000800
 
-
     def _parse_svc_type(self, svc_type):
         if svc_type & SpreadMessage.SELF_DISCARD:
-            print 'GOT SELF-DISCARD MARKED MESSAGE: Sender didnt want a copy of it!'
+            pass #print 'GOT SELF-DISCARD MARKED MESSAGE: Sender didnt want a copy of it!'
         if svc_type & SpreadMessage.REGULAR_MESS:
-            print '>> Regular Message Received message << (+)'
+            #print '>> Regular Message Received message << (+)'
             # assume a regular message is never also a membership message!
             self.type_regular = True
         if svc_type & SpreadMessage.REG_MEMB_MESS:
-            print '>> MEMBERSHIP message << (--)'
+            pass #print '>> MEMBERSHIP message << (--)'
         if self.svc_type & self.REG_OR_TRANS_MESS:
-            print '>> Some kinda membership message << (-)'
+            #print '>> Some kinda membership message << (-)'
             self.type_membership = True
             if self.svc_type & self.TRANSITION_MESS:
-                print '>> TRANSITIONAL MEMBERSHIP MESSAGE <<  (A)'
+                #print '>> TRANSITIONAL MEMBERSHIP MESSAGE <<  (A)'
                 self.is_transitional = True
         if self.svc_type & self.REG_MEMB_MESS:
-            print '>> REGULAR MEMBERSHIP MESSAGE <<  (B)'
+            #print '>> REGULAR MEMBERSHIP MESSAGE <<  (B)'
             self.is_membership = True
         if self.is_membership:
             if svc_type & self.CAUSED_BY_JOIN:
-                print '  CAUSED BY JOIN   <<<<<'
+                #print '  CAUSED BY JOIN   <<<<<'
                 self.cause_join = True
             if svc_type & self.CAUSED_BY_LEAVE:
-                print '  CAUSED BY LEAVE   <<<<<'
+                #print '  CAUSED BY LEAVE   <<<<<'
                 self.cause_leave = True
             if svc_type & self.CAUSED_BY_DISCONNECT:
-                print '  CAUSED BY DISCONNECT   <<<<<'
+                #print '  CAUSED BY DISCONNECT   <<<<<'
                 self.cause_disconnect = True
             if svc_type & self.CAUSED_BY_NETWORK:
-                print '  CAUSED BY NETWORK   <<<<<'
+                #print '  CAUSED BY NETWORK   <<<<<'
                 self.cause_network = True
 
     def __init__(self, svc_type, mesg_type, sender, num_groups, mesg_len):
@@ -107,7 +147,6 @@ class SpreadMessage(object):
         self.cause_network = self.cause_disconnect = self.cause_join = self.cause_leave = False
         self._parse_svc_type(svc_type)
 
-
 class SpreadMessage2(object):
     def _set_data(self, data):
         self.data = data
@@ -126,6 +165,10 @@ class DataMessage(SpreadMessage2):
         self.groups = groups
         return self
 
+    def __repr__(self):
+        return '%s:  sender:%s,  mesg_type:%d,  groups:%s,  self-disc:%s,  data:"%s"' % (self.__class__,
+                            self.sender, self.mesg_type, self.groups, self.self_discarded, self.data)
+
 class MembershipMessage(SpreadMessage2):
     def __init__(self, group):
         SpreadMessage2.__init__(self)
@@ -134,6 +177,9 @@ class MembershipMessage(SpreadMessage2):
     def _set_grps(self, groups):
         self.members = groups
         return self
+
+    def __repr__(self):
+        return '%s:  group:%s,  members:%s' % (self.__class__, self.group, self.members)
 
 class TransitionalMessage(MembershipMessage): pass
 
@@ -150,6 +196,8 @@ class LeaveMessage(MembershipMessage):
         if self_leave:
             print '!*! SELF-LEAVE DETECTED!'
 
+    def __repr__(self):
+        return '%s:  group:%s,  self_leave:%s' % (self.__class__, self.group, self.self_leave)
 
 class SpreadMessageFactory(object):
     '''Class to determine the kind of spread message and return an object that represents
@@ -163,52 +211,51 @@ class SpreadMessageFactory(object):
         return mesg
 
     def process_groups(self, groups):
-        self.this_mesg._set_grps(groups)
-        return self.this_mesg
+        this_mesg = self.this_mesg
+        if this_mesg is None:
+            return None
+        this_mesg._set_grps(groups)
+        return this_mesg
 
     def process_data(self, data):
-        self.this_mesg._set_data(data)
-        return self.this_mesg
+        this_mesg = self.this_mesg
+        if this_mesg is None:
+            return None
+        this_mesg._set_data(data)
+        return this_mesg
 
     def process_header(self, svc_type, mesg_type, sender):
-        if svc_type & SpreadMessage.REGULAR_MESS:
-            #print '>> Regular Message Received message << (+)'
-            # assume a regular message is never also a membership message!
-            self_discarded = svc_type & SpreadMessage.SELF_DISCARD
+        if svc_type & ServiceTypes.REGULAR_MESS:
+            # REGULAR message, we assume a regular message is never also a membership message
+            self_discarded = svc_type & ServiceTypes.SELF_DISCARD != 0
             self.this_mesg = DataMessage(sender, mesg_type, self_discarded)
             return self.this_mesg
-        if svc_type & SpreadMessage.REG_MEMB_MESS:
-            #print '>> MEMBERSHIP message << (--)'
-            if svc_type & SpreadMessage.TRANSITION_MESS:
-                #print '>> TRANSITIONAL MEMBERSHIP MESSAGE <<  (A)'
+        if svc_type & ServiceTypes.REG_MEMB_MESS:
+            # MEMBERSHIP messages
+            if svc_type & ServiceTypes.TRANSITION_MESS:
+                # TRANSITIONAL message, a type of membership message
                 self.this_mesg = TransitionalMessage(sender)
                 return self.this_mesg
-            if svc_type & SpreadMessage.CAUSED_BY_JOIN:
-                #print '  CAUSED BY JOIN   <<<<<'
+            if svc_type & ServiceTypes.CAUSED_BY_JOIN:
                 self.this_mesg = JoinMessage(sender)
                 return self.this_mesg
-            elif svc_type & SpreadMessage.CAUSED_BY_LEAVE:
-                #print '  CAUSED BY LEAVE   <<<<<'
+            if svc_type & ServiceTypes.CAUSED_BY_LEAVE:
                 self.this_mesg = LeaveMessage(sender)
                 return self.this_mesg
-            elif svc_type & SpreadMessage.CAUSED_BY_DISCONNECT:
-                #print '  CAUSED BY DISCONNECT   <<<<<'
+            if svc_type & ServiceTypes.CAUSED_BY_DISCONNECT:
                 self.this_mesg = DisconnectMessage(sender)
                 return self.this_mesg
-            elif svc_type & SpreadMessage.CAUSED_BY_NETWORK:
-                #print '  CAUSED BY NETWORK   <<<<<'
+            if svc_type & ServiceTypes.CAUSED_BY_NETWORK:
                 self.this_mesg = NetworkMessage(sender)
                 return self.this_mesg
-            else:
-                # error here, unknown cause!
-                print 'ERROR: unknown membership change CAUSE.'
-        elif svc_type & SpreadMessage.CAUSED_BY_LEAVE:
+            # fall-thru error here, unknown cause!
+            print 'ERROR: unknown membership change CAUSE.  svc_type=0x%04x' % (svc_type)
+        elif svc_type & ServiceTypes.CAUSED_BY_LEAVE:
             # self-LEAVE message!
             self.this_mesg = LeaveMessage(sender, True)
             return self.this_mesg
-        else:
-            # error here, unknown type
-            print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.'
+        # fall-thru error here, unknown type
+        print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type)
         self.this_mesg = None
         return None
 
@@ -221,18 +268,12 @@ class SpreadGroup(object):
         '''Returns a tuple of two lists of (left, joined)'''
         pass
 
-class ServiceTypes(object):
-    JOIN = 0x00010000
-    LEAVE = 0x020000
-    KILL = 0x00040000
-    SEND = 0x00000002
+class SpreadListener(object):
+    def receive(self, message):
+        print '!-!-!  SpreadListener:  Received message:', message
 
-    JOIN_PKT = struct.pack('!I', JOIN)
-    LEAVE_PKT = struct.pack('!I', LEAVE)
-    KILL_PKT = struct.pack('!I', KILL)
-    SEND_PKT = struct.pack('!I', SEND)
-    SEND_SELFDISCARD_PKT = struct.pack('!I', SEND | SpreadMessage.SELF_DISCARD)
-
+    def membership(self, message):
+        print '!-!-!  SpreadListener:  Received MEMBERHSIP message:', message
 
 class AsyncSpread(asynchat.async_chat):
 
@@ -241,6 +282,7 @@ class AsyncSpread(asynchat.async_chat):
                  cb_connected=None,
                  cb_data=None,
                  cb_membership=None,
+                 listener=None,
                  membership_notifications=True,
                  priority_high=False,
                  debug=False,
@@ -261,6 +303,7 @@ class AsyncSpread(asynchat.async_chat):
         # optional args, callbacks
         self.cb_connected = cb_connected
         self.cb_dropped = cb_dropped
+        self.listener = listener # general listener
         self.cb_data = cb_data
         self.cb_membership = cb_membership
         self.cb_by_group = dict() # per-group callbacks
@@ -271,7 +314,7 @@ class AsyncSpread(asynchat.async_chat):
         self.ibuffer_start = 0
         self.msg_count = 0
         #
-        self.do_reflection = True # don't reflect my messages back to myself
+        self.do_reflection = True # False = don't reflect my messages back to myself
         self.reflected_drops = 0
         # more settings
         self.queue_joins = []
@@ -322,7 +365,6 @@ class AsyncSpread(asynchat.async_chat):
         self._check_timeouts()
         while not self.dead and (count is None or main_loop < count):
             main_loop += 1
-            ping_loop += 1
             asyncore.loop(timeout=timeout, count=1)
             if self.private_name is not None and len(self.queue_joins) > 0:
                 if self.debug:
@@ -331,6 +373,7 @@ class AsyncSpread(asynchat.async_chat):
                 self.queue_joins = []
                 self.join(q_groups)
             # every N iterations, check for timed out pings
+            ping_loop += 1
             if expire_every and ping_loop >= expire_every:
                 ping_loop = 0
                 self._check_timeouts()
@@ -369,6 +412,16 @@ class AsyncSpread(asynchat.async_chat):
                 cb(False, elapsed)
             except: pass
 
+    def _drop(self):
+        self.dead = True
+        self.close()
+
+    def _dispatch(self, message):
+        listener = self.listener
+        if listener is not None:
+            listener.receive(message)
+
+
     def collect_incoming_data(self, data):
         '''Buffer the data'''
         self.ibuffer += data
@@ -405,8 +458,7 @@ class AsyncSpread(asynchat.async_chat):
         #print 'supported auth methods:', methods
         if 'NULL' not in methods: # add 'IP' support at some point
             print 'ERROR, cannot handle non-NULL authentication: "%s"' % (data)
-            self.dead = True
-            self.close()
+            self._drop()
             return
         msg_auth = struct.pack('90s', 'NULL')
         self.wait_bytes(1, self.st_read_session)
@@ -418,20 +470,18 @@ class AsyncSpread(asynchat.async_chat):
         (accept,) = struct.unpack('b', data)
         if accept != 1:
             print 'Failed authentication / connection:', accept
-            self.dead = True
-            self.close()
+            self._drop()
             raise SpreadException(accept)
         self.wait_bytes(3, self.st_read_version)
 
     def st_read_version(self, data):
         if self.debug:
             print 'STATE: st_read_version'
-        (majorVersion, minorVersion, patchVersion) = struct.unpack('BBB', data)
+        (majorVersion, minorVersion, patchVersion) = struct.unpack('bbb', data)
         #print 'Server version: %d.%d.%d' % (majorVersion, minorVersion, patchVersion)
         version = (majorVersion | minorVersion | patchVersion)
         if version == -1: # when does this happen? does it?
-            self.dead = True
-            self.close()
+            self._drop()
             raise SpreadException(version)
         self.server_version = (majorVersion, minorVersion, patchVersion)
         self.wait_bytes(1, self.st_read_private_name)
@@ -441,9 +491,8 @@ class AsyncSpread(asynchat.async_chat):
             print 'STATE: st_read_private_name'
         (group_len,) = struct.unpack('b', data)
         if group_len == -1:
-            self.dead = True
-            self.close()
-            raise SpreadException(group_len)
+            self._drop()
+            raise SpreadException(group_len) # TODO: FAIL
         self.wait_bytes(group_len, self.st_set_private)
 
     def st_set_private(self, data):
@@ -474,10 +523,9 @@ class AsyncSpread(asynchat.async_chat):
         # build up the SpreadMessage object...
         this_mesg = SpreadMessage(svc_type, mesg_type, sender, num_groups, mesg_len)
         self.this_mesg = this_mesg
-        # start using the message factory...
-        factory_mesg = self.mfactory.process_header(svc_type, mesg_type, sender)
-        #
         self.this_svcType = svc_type
+        # pass header to message factory
+        factory_mesg = self.mfactory.process_header(svc_type, mesg_type, sender)
         if this_mesg.type_membership:
             self.this_reg_message = False
             if self.debug:
@@ -499,7 +547,7 @@ class AsyncSpread(asynchat.async_chat):
             self.wait_bytes(mesg_len, self.st_read_message)
             return
         # At this point, we have a full message in factory_mesg
-        print 'HAVE FACTORY PRODUCED MESSAGE NOW:', factory_mesg
+        self._dispatch(factory_mesg)
         self.wait_bytes(48, self.st_read_header)
         return
 
@@ -524,8 +572,7 @@ class AsyncSpread(asynchat.async_chat):
             return
         # this condition never happens...  hm!
         # call any callbacks here, to indicate membership changes and such
-        print 'NEED CALLBACK HERE'
-        print 'HAVE FACTORY PRODUCED MESSAGE NOW:', factory_mesg
+        self._dispatch(factory_mesg)
         self.wait_bytes(48, self.st_read_header)
         return
 
@@ -536,6 +583,8 @@ class AsyncSpread(asynchat.async_chat):
         self.wait_bytes(48, self.st_read_header) # always going to a new message next
         this_mesg = self.this_mesg
         this_mesg.data = data
+        factory_mesg = self.mfactory.process_data(data)
+        self._dispatch(factory_mesg)
         if self.msg_count % 2000 == 0:
             print 'GOT MESSAGE %d, at %.1f msgs/second' % (self.msg_count, self.msg_count / (time.time() - self.start_time))
         print 'GOT MESSAGE (mtype:0x%04x) %d (%d bytes): ' % (this_mesg.mesg_type, self.msg_count, len(data)), data
@@ -582,10 +631,13 @@ class AsyncSpread(asynchat.async_chat):
     def st_read_memb_change(self, data):
         if self.debug:
             print 'STATE: st_read_memb_change():, data=', data, 'len(data)=%d' % (len(data))
+            # data is notsimply decodable... sigh.  groupID?
         self.msg_count += 1
         self.wait_bytes(48, self.st_read_header) # always
         this_mesg = self.this_mesg
         group = this_mesg.sender
+        factory_mesg = self.mfactory.process_data(data)
+        self._dispatch(factory_mesg)
         print 'GOT Membership MESSAGE about group "%s" number %d (%d bytes): ' % (group, self.msg_count, len(data))
         # Ok, this is bad boilerplate here
         if this_mesg.cause_network:
@@ -618,25 +670,25 @@ class AsyncSpread(asynchat.async_chat):
             print 'WARNING: no private channel name known yet from server... queueing up group join for:', groups
             self.queue_joins.extend(groups)
             return False
-        send_head = protocol_create(ServiceTypes.JOIN_PKT, 0, self.private_name, groups, 0)
+        send_head = protocol_create(SpreadProto.JOIN_PKT, 0, self.private_name, groups, 0)
         self.push(send_head)
         return True
 
     def leave(self, groups):
-        send_head = protocol_create(ServiceTypes.LEAVE_PKT, 0, self.private_name, groups, 0)
+        send_head = protocol_create(SpreadProto.LEAVE_PKT, 0, self.private_name, groups, 0)
         self.push(send_head)
         return True
 
     def disconnect(self):
-        send_head = protocol_create(ServiceTypes.KILL_PKT, 0, self.private_name, [self.private_name], 0)
+        who = 'tra-000255'
+        #who = self.private_name
+        send_head = protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
         self.push(send_head)
-        self.dead = True
-        self.close()
+        self._drop()
         return True
 
     def multicast(self, groups, message, mesg_type, self_discard=True):
-        '''
-        Send a message to all members of a group.
+        '''Send a message to all members of a group.
 
         @param groups: group list (string)
         @type groups: list
@@ -644,6 +696,8 @@ class AsyncSpread(asynchat.async_chat):
         @type message: string
         @param mesg_type: numeric message type, must fit in 16 bits
         @type mesg_type: int (short int)
+        @param self_discard: set to True to stop server from reflecting message back to me
+        @type self_discard: bool
         '''
         if self.private_name is None:
             print 'WARNING: no private channel name known yet from server... Failed message'
@@ -651,8 +705,11 @@ class AsyncSpread(asynchat.async_chat):
         #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
         data_len = len(message)
         # was SEND_PKT below.  this is good news.
-        #header = protocol_create(ServiceTypes.SEND_SELFDISCARD_PKT, mesg_type, self.private_name, groups, data_len)
-        header = protocol_create(ServiceTypes.SEND_PKT, mesg_type, self.private_name, groups, data_len)
+        if self_discard:
+            svc_type_pkt = SpreadProto.SEND_SELFDISCARD_PKT
+        else:
+            svc_type_pkt = SpreadProto.SEND_PKT
+        header = protocol_create(svc_type_pkt, mesg_type, self.private_name, groups, data_len)
         payload = struct.pack('%ss' % data_len, message)
         pkt = ''.join((header, payload))
         self.push(pkt)
@@ -678,7 +735,6 @@ class AsyncSpread(asynchat.async_chat):
         print '  members:', membership
         if not self.groups.has_key(group):
             # new group!
-            #print 'FIRST JOIN!'
             self.groups[group] = set(membership) # turn into a set()
             print 'Group Update callback needed here'
             return
@@ -699,8 +755,6 @@ class AsyncSpread(asynchat.async_chat):
             else:
                 # then this is a departure!
                 print 'MEMBER LEFT:', client
-
-
 
 
 class SpreadException(Exception):
@@ -728,19 +782,12 @@ class SpreadException(Exception):
         self.err_msg = SpreadException.errors.get(errno, 'unrecognized error')
         print 'SpreadException: %s' % (self.err_msg)
 
-
-# Should move these into the MessageFactory class? or SpreadProto?
-
-def make_header_fmt(num_groups):
-    pack_str = '>32sI4sI' + ('32s' * num_groups)
-    return pack_str
-
-# must optimize this more
+# Should move these into SpreadProto?
 def protocol_create(svcType, mesgtype, pname, gname, data_len=0):
     #print 'protocol_Create(len(svctype)=%d, mesgtype=%s, pname=%s, gnames=%s, data_len=%d)' % (len(svcType), mesgtype, pname, gname, data_len)
     mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
-    msg_hdr = struct.pack('>32sI4sI', pname, len(gname), mesgtype_str,data_len)
-    grp_tag  = '32s' * len(gname)
+    msg_hdr = struct.pack('>32sI4sI', pname, len(gname), mesgtype_str, data_len)
+    grp_tag  = SpreadProto.GROUP_FMTS[len(gname)] # '32s' * len(gname)
     grp_hdr = struct.pack(grp_tag, *gname)
     hdr = ''.join((svcType, msg_hdr, grp_hdr))
     return hdr

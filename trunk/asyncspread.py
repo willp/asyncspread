@@ -680,8 +680,7 @@ class AsyncSpread(asynchat.async_chat):
         return True
 
     def disconnect(self):
-        who = 'tra-000255'
-        #who = self.private_name
+        who = self.private_name
         send_head = protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
         self.push(send_head)
         self._drop()

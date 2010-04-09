@@ -10,7 +10,7 @@ I didn't really expect to go in this direction when I started, but it makes a lo
 
 Another cool thing, is that I learned you don't have to define a constructor for every class in python.  I don't know why, but I assumed they were necessary.  Well, not so, and now the various flavors of MembershipMessage subclasses have almost no code in them at all, except where it makes sense- like the extra boolean "self_leave" property of LeaveMessage objects, which only makes sense for that specific message.
 
-I'm still wondering just where I might stick a deque in all this, to make it easier to run multi-threaded code.  Maybe in the SpreadListener?  I'm also wondering what the listener's API should be.  And wondering if the various *Message classes should be consumable by the code, or if they should remain purely output objects.  At the moment, sending a message or performing a join/leave/disconnect operation is just a method call, not an object creation (other than strings).
+I'm still wondering just where I might stick a deque in all this, to make it easier to run multi-threaded code.  Maybe in the SpreadListener?  I'm also wondering what the listener's API should be.  And wondering if the various Message classes should be consumable by the code, or if they should remain purely output objects.  At the moment, sending a message or performing a join/leave/disconnect operation is just a method call, not an object creation (other than strings).
 
 
 === April 7, 2010 ===

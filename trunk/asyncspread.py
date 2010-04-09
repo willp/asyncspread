@@ -273,7 +273,33 @@ class SpreadListener(object):
         print '!-!-!  SpreadListener:  Received message:', message
 
     def membership(self, message):
-        print '!-!-!  SpreadListener:  Received MEMBERHSIP message:', message
+        print '!-!-!  SpreadListener:  Received MEMBERSHIP message:', message
+
+    def update_group_membership(self, group, membership):
+        print 'Update Group Membership: group "%s" now has members' % (group)
+        print '  members:', membership
+        if not self.groups.has_key(group):
+            # new group!
+            self.groups[group] = set(membership) # turn into a set()
+            print 'Group Update callback needed here'
+            return
+        if len(membership) == 0:
+            print 'SELF-LEAVE DETECTED.  Left group "%s"' % (group)
+            del self.groups[group]
+            print 'Group Update callback needed here'
+            return
+        # now compute differences
+        old_members = self.groups[group]
+        new_members = set(membership)
+        differences = old_members ^ new_members
+        self.groups[group] = new_members
+        for client in differences:
+            if client not in old_members:
+                # then this is an add!
+                print 'NEW MEMBER FOUND:', client
+            else:
+                # then this is a departure!
+                print 'MEMBER LEFT:', client
 
 class AsyncSpread(asynchat.async_chat):
 
@@ -541,7 +567,6 @@ class AsyncSpread(asynchat.async_chat):
         if num_groups > 0:
             self.wait_bytes(num_groups * SpreadProto.MAX_GROUP_LEN, self.st_read_groups)
             return
-        print 'ZERO groups for this message.  Need callback here.'
         if mesg_len > 0:
             print 'Waiting for PAYLOAD on zero-group mesg (membership notice?) payload len=%d' % (mesg_len)
             self.wait_bytes(mesg_len, self.st_read_message)

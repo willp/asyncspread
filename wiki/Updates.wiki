@@ -2,7 +2,18 @@
 
 = Latest News =
 
-April 7, 2010
+=== April 8, 2010 ===
+
+Got the message factory ironed out.  I'm still removing the old style message creation, though.  And I'm starting to move the callback mechanism out of the Asyncspread class, and into a SpreadListener class.  This will make it super easy to implement different message-dispatch mechanisms by subclassing SpreadListener, or by implementing its protocol ("Interface" to java folks).
+
+I didn't really expect to go in this direction when I started, but it makes a lot of sense now that I've actually implemented a group registration process for callbacks into user code.  The asyncore/asynchat derived class gets so messy dealing with the message-routing specific logic, it ends up looking like spaghetti.  So I'm repeatedly refactoring.  One nice part of this refactoring is that the code is simplified, and easier to enhance.  After I discovered the "SELF_DISCARD" flag and tested it out, it was a piece of cake to add to the newly refactored DataMessage class without cluttering up any of the MembershipMessage classes.
+
+Another cool thing, is that I learned you don't have to define a constructor for every class in python.  I don't know why, but I assumed they were necessary.  Well, not so, and now the various flavors of MembershipMessage subclasses have almost no code in them at all, except where it makes sense- like the extra boolean "self_leave" property of LeaveMessage objects, which only makes sense for that specific message.
+
+I'm still wondering just where I might stick a deque in all this, to make it easier to run multi-threaded code.  Maybe in the SpreadListener?  I'm also wondering what the listener's API should be.  And wondering if the various *Message classes should be consumable by the code, or if they should remain purely output objects.  At the moment, sending a message or performing a join/leave/disconnect operation is just a method call, not an object creation (other than strings).
+
+
+=== April 7, 2010 ===
 
 I'm again refactoring the code, to really clean up the message class.  The 'canonical' Java API for Spread has an extremely weak SpreadMessage class, and I realized that I was starting to mimic it for no good reason.  It is weak because a SpreadMessage object doesn't actually map to the _type_ of Spread message that it represents.  It is an unholy mess of boolean methods that you must query to determine what actual type of message you're dealing with.  And it also supports lots of methods that don't make any sense for a SpreadMessage of certain types.  For example, the getMembershipInfo() method exists for all SpreadMessage objects, but it is only valid when isMembership() returns True.  Otherwise, the result is undefined.
 
@@ -15,9 +26,9 @@ Only at _this_ point is where it makes any sense to process callbacks for data m
 So, that's what's going on now.  I probably typed more characters describing the changes than the code will sum up to.  To sum up, for poor grammar's sake, a preposition is what I will end with.
 
 
-= Recent News =
+== Recent News ==
 
-March 31, 2010
+=== March 31, 2010 ===
 
 I've made a lot of progress on the packet marshalling code, and I'm done converting the code to being completely non-blocking.  I'm pretty sure this code won't ever get out of sync with the server, now that it understands the header fields _much_ better.
 

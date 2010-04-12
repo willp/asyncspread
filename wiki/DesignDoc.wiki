@@ -1,0 +1,8 @@
+#summary Design document for AsyncSpread client API.
+
+http://nuclei.com/asyncspread/AsyncSpread_logo.png
+
+= Architecture =
+
+
+

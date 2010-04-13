@@ -1,8 +1,18 @@
 #summary Design document for AsyncSpread client API.
 
-http://nuclei.com/asyncspread/AsyncSpread_logo.png
+http://nuclei.com/asyncspread/AsyncSpread_sm3.png
+
+A Python client API for the Spread 4.x group messaging system.
 
 = Architecture =
 
+Overall, the architecture consists of several classes:
+  * AsyncSpread - asynchronous connection and protocol handlers
+  * SpreadProto, ServiceTypes - non-instantiated container classes for protocol specific parameters
+  * SpreadMessage - base class for all messages received from a Spread daemon
+  * MembershipMessage - base class for membership notification messages
+  * JoinMessage, LeaveMessage, DisconnectMessage, TransitionalMessage, NetworkMessage - specific MembershipMessage variants, actually instantiated
+  * DataMessage - messages sent by other Spread clients, with payload and "mesg_type" hint
 
 
+AsyncSpread is a subclass of the asynchat.asyc_chat, which implements the wire-protocol of Spread 4.x using asynchronous event processing on a TCP socket connected to a Spread daemon.  One instance of the AsyncSpread class is one connection to a Spread network.

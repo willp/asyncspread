@@ -1,18 +1,22 @@
 #!/usr/bin/python
 import asyncspread, time, sys
 
+class MyListener(asyncspread.SpreadListener):
+    def handle_ping(self, success, elapsed):
+        print '*** PONG:  Success:', success, ' Elapsed:', elapsed
+
+    def handle_data(self, conn, mesg):
+        print '*** Got message:', mesg.data
+
 def ping_cb(success, elapsed):
     print '*** PONG:  Success:', success, ' Elapsed:', elapsed
 
 def mesg_cb(mesg):
     print '*** Got message:', mesg.data
 
-def g3_cb(mesg):
-    print '*** g3 got callback data:\n::', mesg.data, '\nwhich was sent to groups::', mesg.groups
-
+listener = MyListener() # asyncspread.SpreadListener()
 myname = 'ts-%s' % (int(time.time()*10) % 1000)
-sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data=mesg_cb, debug=False)
-sp.add_group_callback('gr3', g3_cb)
+sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data=mesg_cb, debug=False, listener=listener)
 ret = sp.start_connect()
 
 print 'Connected?', ret

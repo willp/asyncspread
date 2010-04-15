@@ -173,6 +173,7 @@ class MembershipMessage(SpreadMessage2):
     def __init__(self, group):
         SpreadMessage2.__init__(self)
         self.group = group
+        self.members = []
 
     def _set_grps(self, groups):
         self.members = groups
@@ -269,37 +270,53 @@ class SpreadGroup(object):
         pass
 
 class SpreadListener(object):
-    def receive(self, message):
+    def __init__(self):
+        self.groups = dict()
+
+    def handle_data(self, conn, message):
         print '!-!-!  SpreadListener:  Received message:', message
 
-    def membership(self, message):
+    def handle_membership(self, conn, message):
+        '''Do not over-ride this method unless you plan on implementing an alternate
+        mechanism for tracking group membership changes.'''
         print '!-!-!  SpreadListener:  Received MEMBERSHIP message:', message
+        # regardless of message type (join/leave/disconnect/network), calculate membership changes
+        self.update_group_membership(message)#.group, message.members)
 
-    def update_group_membership(self, group, membership):
-        print 'Update Group Membership: group "%s" now has members' % (group)
-        print '  members:', membership
+    def update_group_membership(self, message):#group, membership):
+        group = message.group
+        membership = set(message.members)
+        print '2> Update Group Membership: group "%s" now has members:' % (group), membership
         if not self.groups.has_key(group):
             # new group!
-            self.groups[group] = set(membership) # turn into a set()
-            print 'Group Update callback needed here'
+            self.groups[group] = membership # use set()
+            print '2> Group Update callback needed here'
             return
         if len(membership) == 0:
-            print 'SELF-LEAVE DETECTED.  Left group "%s"' % (group)
+            print '2> SELF-LEAVE DETECTED.  Left group "%s"' % (group)
             del self.groups[group]
-            print 'Group Update callback needed here'
+            print '2> Group Update callback needed here'
             return
         # now compute differences
         old_members = self.groups[group]
-        new_members = set(membership)
-        differences = old_members ^ new_members
         self.groups[group] = new_members
+        differences = old_members ^ self.groups[group] # symmetric difference
         for client in differences:
             if client not in old_members:
                 # then this is an add!
-                print 'NEW MEMBER FOUND:', client
+                print '2> NEW MEMBER FOUND:', client
+                self.handle_group_join(group, client)
             else:
                 # then this is a departure!
-                print 'MEMBER LEFT:', client
+                print '2> MEMBER LEFT:', client
+                self.handle_group_leave(group, client)
+
+    def handle_group_join(self, group, client):
+        pass
+
+    def handle_group_leave(self, group, client):
+        pass
+
 
 class AsyncSpread(asynchat.async_chat):
 
@@ -445,8 +462,10 @@ class AsyncSpread(asynchat.async_chat):
     def _dispatch(self, message):
         listener = self.listener
         if listener is not None:
-            listener.receive(message)
-
+            if isinstance(message, MembershipMessage):
+                listener.handle_membership(self, message)
+            else:
+                listener.handle_data(self, message)
 
     def collect_incoming_data(self, data):
         '''Buffer the data'''
@@ -622,26 +641,22 @@ class AsyncSpread(asynchat.async_chat):
         if this_mesg.sender == self.private_name:
             # message to myself!
             if this_mesg.mesg_type == self.ping_mtype:
-                #print 'PING RECEIVED BACK TO MYSELF:', data
                 (head, ping_id, timestamp) = data.split(':')
                 ping_id = int(ping_id)
                 elapsed = time.time() - float(timestamp)
-                #print 'Round trip time: %.8f seconds' % ( elapsed )
-                # Now, a delayed ping may have been expired! need to handle that
+                # pings expire:
                 if ping_id not in self.ping_callbacks:
-                    print 'LATE PING ARRIVED, Elapsed:', elapsed
+                    print 'LATE PING ARRIVED.  Ignoring it. Elapsed:', elapsed
                     return
                 else:
                     (ping_cb, send_time, timeout) = self.ping_callbacks.pop(ping_id)
                     ping_cb (True, elapsed)
                     return
-            # else, this is a reflection of my own message back to me... Probably best NOT to deliver this back to myself
-            # but make it configurable...
+            # else, my own message reflected back to me. Check anti-reflection configuration:
             if not self.do_reflection:
                 self.reflected_drops += 1
-                #print 'Reflected drops:', self.reflected_drops
                 return
-        # else, this is a message we need to send to a user callback
+        # else, we need to send this message to a user callback
         if self.debug:
             print 'Sender = "%s"    My private name:"%s"  %d == %d' % (this_mesg.sender, self.private_name, len(this_mesg.sender), len(self.private_name))
         if self.cb_data:
@@ -650,7 +665,6 @@ class AsyncSpread(asynchat.async_chat):
             group_cbs = self.cb_by_group.get(g, None)
             if group_cbs:
                 (data_cb, memb_cb) = group_cbs
-                #print 'Invoking per-group callback for group "%s"' % (g)
                 data_cb(this_mesg)
 
     def st_read_memb_change(self, data):
@@ -659,35 +673,8 @@ class AsyncSpread(asynchat.async_chat):
             # data is notsimply decodable... sigh.  groupID?
         self.msg_count += 1
         self.wait_bytes(48, self.st_read_header) # always
-        this_mesg = self.this_mesg
-        group = this_mesg.sender
         factory_mesg = self.mfactory.process_data(data)
         self._dispatch(factory_mesg)
-        print 'GOT Membership MESSAGE about group "%s" number %d (%d bytes): ' % (group, self.msg_count, len(data))
-        # Ok, this is bad boilerplate here
-        if this_mesg.cause_network:
-            #if len(data) >= 24:
-            #    change_fmt = '>IIIIII%ds' % (len(data) - 24)
-            #    (w1, w2, w3, w4, w5, w6, who) = struct.unpack(change_fmt, data)
-            #    print 'DECODED Membership info:  ',(w1, w2, w3, w4, w5, w6, who)
-            #    print 'DECODED Membership info:  (0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x, "%s")' % (w1, w2, w3, w4, w5, w6, who)
-            print 'NETWORK CHANGE DETECTED'
-            self.update_group_membership(group, this_mesg.groups)
-        elif this_mesg.cause_join:
-            # then
-            print 'JOIN DETECTED:'
-            self.update_group_membership(group, this_mesg.groups)
-        elif this_mesg.cause_leave:
-            print 'LEAVE DETECTED:'
-            self.update_group_membership(group, this_mesg.groups)
-        elif this_mesg.cause_disconnect:
-            print 'DISCONNECT DETECTED:'
-            self.update_group_membership(group, this_mesg.groups)
-        if self.cb_membership is not None:
-            try:
-                self.cb_membership(group) # TODO: FIXME! Bad calling args. Figure them out.
-            except:
-                pass
 
     # only works after getting connected
     def join(self, groups):
@@ -753,32 +740,6 @@ class AsyncSpread(asynchat.async_chat):
         mesg_type = 0xffff
         self.ping_callbacks[this_id] = (callback, time.time(), timeout)
         self.unicast(self.private_name, payload, mesg_type)
-
-    def update_group_membership(self, group, membership):
-        print 'Update Group Membership: group "%s" now has members' % (group)
-        print '  members:', membership
-        if not self.groups.has_key(group):
-            # new group!
-            self.groups[group] = set(membership) # turn into a set()
-            print 'Group Update callback needed here'
-            return
-        if len(membership) == 0:
-            print 'SELF-LEAVE DETECTED.  Left group "%s"' % (group)
-            del self.groups[group]
-            print 'Group Update callback needed here'
-            return
-        # now compute differences
-        old_members = self.groups[group]
-        new_members = set(membership)
-        differences = old_members ^ new_members
-        self.groups[group] = new_members
-        for client in differences:
-            if client not in old_members:
-                # then this is an add!
-                print 'NEW MEMBER FOUND:', client
-            else:
-                # then this is a departure!
-                print 'MEMBER LEFT:', client
 
 
 class SpreadException(Exception):

@@ -15,4 +15,4 @@ Overall, the architecture consists of several classes:
   * DataMessage - messages sent by other Spread clients, with payload and "mesg_type" hint
 
 
-AsyncSpread is a subclass of the asynchat.asyc_chat, which implements the wire-protocol of Spread 4.x using asynchronous event processing on a TCP socket connected to a Spread daemon.  One instance of the AsyncSpread class is one connection to a Spread network.
+AsyncSpread is a subclass of the asynchat.async_chat, which implements the wire-protocol of Spread 4.x using asynchronous event processing on a TCP socket connected to a Spread daemon.  One instance of the AsyncSpread class is one connection to a Spread network.

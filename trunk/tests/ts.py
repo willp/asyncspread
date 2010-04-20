@@ -16,14 +16,14 @@ def mesg_cb(mesg):
 
 listener = MyListener() # asyncspread.SpreadListener()
 myname = 'ts-%s' % (int(time.time()*10) % 1000)
-sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data=mesg_cb, debug=False, listener=listener)
+sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data=mesg_cb, debug=True, listener=listener)
 ret = sp.start_connect()
 
 print 'Connected?', ret
 print 'my private name is:',sp.private_name
 sp.join(['gr1', 'group2', 'gr2'])
 sp.loop(1)
-for i in xrange(1, 25):
+for i in xrange(1, 35):
     groups = ['gr1']
     if i % 5 == 0:
         groups.append('gr3')
@@ -43,7 +43,7 @@ for i in xrange(1, 25):
         sp.leave(['gr1'])
         sp.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff)
     sp.loop(2)
-    time.sleep(1)
+    time.sleep(0.5)
 sp.loop(10)
 sp.leave(['gr1'])
 sp.disconnect()

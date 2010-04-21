@@ -123,8 +123,8 @@ class LeaveMessage(MembershipMessage):
     def __init__(self, group, self_leave=False):
         MembershipMessage.__init__(self, group)
         self.self_leave = self_leave
-        if self_leave:
-            print '!*! SELF-LEAVE DETECTED!'
+        #if self_leave:
+        #    print '!*! SELF-LEAVE DETECTED!'
 
     def __repr__(self):
         return '%s:  group:%s,  self_leave:%s' % (self.__class__, self.group, self.self_leave)
@@ -133,9 +133,7 @@ class SpreadMessageFactory(object):
     '''Class to determine the kind of spread message and return an object that represents
     the message we received.  It is optimized for DataMessage types.'''
     def __init__(self):
-        self.this_mesg = None
-        self.num_groups = 0
-        self.mesg_len = 0
+        self._reset()
 
     def _reset(self):
         self.this_mesg = None
@@ -150,14 +148,14 @@ class SpreadMessageFactory(object):
     def process_groups(self, groups):
         this_mesg = self.this_mesg
         if this_mesg is None:
-            return None
+            return None # TODO: raise exception?
         this_mesg._set_grps(groups)
         return this_mesg
 
     def process_data(self, data):
         this_mesg = self.this_mesg
         if this_mesg is None:
-            return None
+            return None # TODO: raise exception?
         this_mesg._set_data(data)
         return this_mesg
 
@@ -193,19 +191,16 @@ class SpreadMessageFactory(object):
             # self-LEAVE message!
             self.this_mesg = LeaveMessage(sender, True)
             return self.this_mesg
+        # strange, sometimes this is received NOT as a regular membership message
+        if svc_type & ServiceTypes.TRANSITION_MESS:
+            # TRANSITIONAL message, a type of membership message
+            self.this_mesg = TransitionalMessage(sender)
+            return self.this_mesg
         # fall-thru error here, unknown type
         print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type)
         self.this_mesg = None
         return None
 
-class SpreadGroup(object):
-    def __init__(self, name):
-        self.name = name
-        self.members = None
-
-    def update_members(self, membership):
-        '''Returns a tuple of two lists of (left, joined)'''
-        pass
 
 class SpreadListener(object):
     def __init__(self):
@@ -219,40 +214,56 @@ class SpreadListener(object):
         mechanism for tracking group membership changes.'''
         print '!-!-!  SpreadListener:  Received MEMBERSHIP message:', message
         # regardless of message type (join/leave/disconnect/network), calculate membership changes
-        self.update_group_membership(message)#.group, message.members)
+        self.update_group_membership(message)
 
-    def update_group_membership(self, message):#group, membership):
+    def update_group_membership(self, message):
         group = message.group
-        membership = set(message.members)
-        print '2> Update Group Membership: group "%s" now has members:' % (group), membership
-        if not self.groups.has_key(group):
-            # new group!
-            self.groups[group] = membership # use set()
-            print '2> Group Update callback needed here'
+        if isinstance(message, TransitionalMessage):
+            self.handle_group_trans(group)
             return
-        if len(membership) == 0:
-            print '2> SELF-LEAVE DETECTED.  Left group "%s"' % (group)
+        new_membership = set(message.members)
+        print '0> Update Group Membership: group "%s" now has members:' % (group), new_membership
+        # new group!
+        if not self.groups.has_key(group):
+            self.groups[group] = new_membership
+            self.handle_group_start(group, new_membership)
+            return
+        old_membership = self.groups[group]
+        if (isinstance(message, LeaveMessage) and message.self_leave) or len(membership) == 0:
             del self.groups[group]
-            print '2> Group Update callback needed here'
+            self.handle_group_end(group, old_membership)
             return
         # now compute differences
-        old_members = self.groups[group]
-        self.groups[group] = new_members
-        differences = old_members ^ self.groups[group] # symmetric difference
-        for client in differences:
-            if client not in old_members:
-                # then this is an add!
-                print '2> NEW MEMBER FOUND:', client
-                self.handle_group_join(group, client)
+        differences = old_membership ^ new_membership # symmetric difference
+        self.groups[group] = new_membership
+        cause = type(message)
+        for member in differences:
+            if member not in old_members:
+                # this is an add
+                self.handle_group_join(group, member, cause)
             else:
-                # then this is a departure!
-                print '2> MEMBER LEFT:', client
-                self.handle_group_leave(group, client)
+                # this is a leave/departure
+                self.handle_group_leave(group, member, cause)
 
-    def handle_group_join(self, group, client):
+    def get_group_members(self, group):
+        return self.groups[group]
+
+    def handle_group_start(self, group, membership):
+        print '0> New Group Joined', group, 'members:', membership
+
+    def handle_group_trans(self, group):
+        print '0> Transitional message received, not much actionable here. Group:', group
         pass
 
-    def handle_group_leave(self, group, client):
+    def handle_group_end(self, group, old_membership):
+        print '0> Group no longer joined:', group, 'Old membership:', old_membership
+
+    def handle_group_join(self, group, member, cause):
+        print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+        pass
+
+    def handle_group_leave(self, group, member, cause):
+        print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
         pass
 
 
@@ -517,7 +528,8 @@ class AsyncSpread(asynchat.async_chat):
         return
 
     def st_read_groups(self, data):
-        group_packer = SpreadProto.GROUP_FMT * self.mfactory.num_groups # could pre-calcualte this if necessary
+        # OLD: SpreadProto.GROUP_FMT * self.mfactory.num_groups # could pre-calculate this if necessary
+        group_packer = SpreadProto.GROUP_FMTS[self.mfactory.num_groups] # '32s' * len(gname)
         groups_padded = struct.unpack(group_packer, data)
         groups = grouplist_trim(groups_padded)
         factory_mesg = self.mfactory.process_groups(groups)
@@ -528,7 +540,8 @@ class AsyncSpread(asynchat.async_chat):
                 return
             self.wait_bytes(mesg_len, self.st_read_message)
             return
-        # this condition never happens...  hm!
+        # handle case of no message body, on self-leave
+        print 'DISPATCHING A  MESSAGE WITH NO BODY'
         self._dispatch(factory_mesg)
         self.wait_bytes(48, self.st_read_header)
         return
@@ -540,14 +553,13 @@ class AsyncSpread(asynchat.async_chat):
         self.wait_bytes(48, self.st_read_header) # always going to a new message next
         factory_mesg = self.mfactory.process_data(data)
         self._dispatch(factory_mesg)
-        print 'GOT MESSAGE %d, at %.1f msgs/second' % (self.msg_count, self.msg_count / (time.time() - self.start_time))
         # Callback time
         # if the destination group is my private name, then send this back to a unicast-receiver method
         # otherwise, need to send this back to a group-based receiver
         # can have a couple of ways of doing this: explode out messages sent to multiple groups to multiple
         # callbacks?  or maybe even
         # Detect a ping to myself
-        if factory_mesg.sender == self.private_name:
+        if isinstance(factory_mesg, DataMessage) and factory_mesg.sender == self.private_name:
             # message to myself!
             if factory_mesg.mesg_type == self.ping_mtype:
                 (head, ping_id, timestamp) = data.split(':')
@@ -565,21 +577,17 @@ class AsyncSpread(asynchat.async_chat):
             if not self.do_reflection:
                 self.reflected_drops += 1
                 return
-        # else, we need to send this message to a user callback
-        if self.debug:
-            print 'Sender = "%s"    My private name:"%s"  %d == %d' % (factory_mesg.sender, self.private_name, len(factory_mesg.sender), len(self.private_name))
-        if self.cb_data:
-            self.cb_data(factory_mesg)
-        for g in factory_mesg.groups:
-            group_cbs = self.cb_by_group.get(g, None)
-            if group_cbs:
-                (data_cb, memb_cb) = group_cbs
-                data_cb(factory_mesg)
+        if False:
+            # else, we need to send this message to a user callback
+            if self.cb_data:
+                self.cb_data(factory_mesg)
+            for g in factory_mesg.groups:
+                group_cbs = self.cb_by_group.get(g, None)
+                if group_cbs:
+                    (data_cb, memb_cb) = group_cbs
+                    data_cb(factory_mesg)
 
     def st_read_memb_change(self, data):
-        #if self.debug:
-        #    print 'STATE: st_read_memb_change():, data=', data, 'len(data)=%d' % (len(data))
-        #    # data is notsimply decodable... sigh.  groupID?
         self.msg_count += 1
         self.wait_bytes(48, self.st_read_header) # always
         factory_mesg = self.mfactory.process_data(data)

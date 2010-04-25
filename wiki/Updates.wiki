@@ -2,6 +2,23 @@
 
 = Latest News =
 
+=== April 25, 2010 ===
+
+Finally finished migrating the message processing to the new Factory approach.  The new code is so much cleaner, it's a relief.  The SpreadListener base class is finally usable, but I still have the "self-ping" functionality buried in the AsyncSpread class, which has to change.  I'm thrilled that some long-duration testing has proved the reliability of this code.  Various versions of the code have been running non-stop for weeks, without any failures or unhandled exceptions.  The TCP connection to the Spread daemon is super reliable.  No issues there.
+
+I like seeing the debug output that shows off the new Message classes, like DataMessage.  Check it out:
+
+{{{
+!-!-!  SpreadListener:  Received message: <class 'asyncspread.DataMessage'>:  sender:#tra-000054#dev103,  mesg_type:65535,  groups:['#tra-000054#dev103'],  self-disc:False,  data:"PING:92644:1272210857.79026604"
+GOT MESSAGE (mtype:0xffff) 93769 (30 bytes):  PING:92644:1272210857.79026604
+Client PING callback: Success= True
+   Elapsed time: 0.00193095
+}}}
+
+I'm slowly removing lots of debug output, but haven't yet switched the code over to using the logging module.  A higher priority is to fix up the main loop to be less stupid, and easier to work with for both non-threaded and threaded environments.
+
+
+
 === April 8, 2010 ===
 
 Got the message factory ironed out.  I'm still removing the old style message creation, though.  And I'm starting to move the callback mechanism out of the Asyncspread class, and into a SpreadListener class.  This will make it super easy to implement different message-dispatch mechanisms by subclassing SpreadListener, or by implementing its protocol ("Interface" to java folks).

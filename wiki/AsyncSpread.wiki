@@ -1,4 +1,4 @@
-#summary Asynchronous Spread connection class
+#summary CLASS: Asynchronous Spread connection class
 
 = Purpose =
 

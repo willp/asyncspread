@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import socket, struct, copy, asyncore, asynchat, time
+import socket, struct, copy, asyncore, asynchat, time, logging
 from collections import deque
 
 # basic API methods:
@@ -64,7 +64,7 @@ class SpreadProto(object):
     HEADER_FMT = 'I%ssIII' % (MAX_GROUP_LEN)
 
     # Pre-create some format strings
-    # don't send to more than MAX_GROUPS groups at once, increase if necessary
+    # Don't send to more than MAX_GROUPS groups at once, increase if necessary
     MAX_GROUPS = 1000
     GROUP_FMTS = [ GROUP_FMT * i for i in xrange(MAX_GROUPS) ]
     # This list will consume 1000*3 = 3 KB, plus overhead.  Worth it to spend the RAM.
@@ -123,8 +123,6 @@ class LeaveMessage(MembershipMessage):
     def __init__(self, group, self_leave=False):
         MembershipMessage.__init__(self, group)
         self.self_leave = self_leave
-        #if self_leave:
-        #    print '!*! SELF-LEAVE DETECTED!'
 
     def __repr__(self):
         return '%s:  group:%s,  self_leave:%s' % (self.__class__, self.group, self.self_leave)
@@ -147,8 +145,7 @@ class SpreadMessageFactory(object):
 
     def process_groups(self, groups):
         this_mesg = self.this_mesg
-        if this_mesg is None:
-            return None # TODO: raise exception?
+        assert (this_mesg is not None, 'Message Factory invoked out of order.')
         this_mesg._set_grps(groups)
         return this_mesg
 
@@ -272,8 +269,6 @@ class AsyncSpread(asynchat.async_chat):
     def __init__(self, name, host, port,
                  cb_dropped=None,
                  cb_connected=None,
-                 cb_data=None,
-                 cb_membership=None,
                  listener=None,
                  membership_notifications=True,
                  priority_high=False,
@@ -293,9 +288,6 @@ class AsyncSpread(asynchat.async_chat):
         self.cb_connected = cb_connected
         self.cb_dropped = cb_dropped
         self.listener = listener # general listener
-        self.cb_data = cb_data
-        self.cb_membership = cb_membership
-        self.cb_by_group = dict() # per-group callbacks
         #
         self.private_name = None
         self.start_time = time.time()
@@ -309,7 +301,7 @@ class AsyncSpread(asynchat.async_chat):
         self.queue_joins = []
         self.dead = False
         self.need_bytes = 0
-        self.mfactory = SpreadMessageFactory()
+        self.mfactory = None
         # group membership info here
         self.groups = dict()
         # optimizations:
@@ -325,6 +317,7 @@ class AsyncSpread(asynchat.async_chat):
         self.ping_mtype = 0xffff # set to None if you want to disable ping processing
 
     def start_connect(self, timeout=5):
+        self.mfactory = SpreadMessageFactory()
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.connect((self.host, self.port))
         return self.wait_for_connection(timeout)
@@ -344,6 +337,7 @@ class AsyncSpread(asynchat.async_chat):
         print 'CONNECTION CLOSED! LOST CONNECTION TO THE SERVER!'
         self.dead = True
         self.private_name = None
+        self.mfactory = None
         self.close()
         if self.cb_dropped is not None:
             self.cb_dropped(self)
@@ -372,8 +366,8 @@ class AsyncSpread(asynchat.async_chat):
             raise(IOError('Connection lost to server'))
         asyncore.loop(timeout=timeout, count=1)
 
-    def add_group_callback(self, group, cb_data, cb_membership=None):
-        self.cb_by_group[group] = (cb_data, cb_membership)
+#    def add_group_callback(self, group, cb_data, cb_membership=None):
+#        self.cb_by_group[group] = (cb_data, cb_membership)
 
     def wait_for_connection(self, timeout=10, sleep_delay=0.1):
         '''Spend time in self.poll() until the timeout expires, or we are connected, whichever first.
@@ -577,15 +571,6 @@ class AsyncSpread(asynchat.async_chat):
             if not self.do_reflection:
                 self.reflected_drops += 1
                 return
-        if False:
-            # else, we need to send this message to a user callback
-            if self.cb_data:
-                self.cb_data(factory_mesg)
-            for g in factory_mesg.groups:
-                group_cbs = self.cb_by_group.get(g, None)
-                if group_cbs:
-                    (data_cb, memb_cb) = group_cbs
-                    data_cb(factory_mesg)
 
     def st_read_memb_change(self, data):
         self.msg_count += 1

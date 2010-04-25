@@ -1,6 +1,7 @@
 #!/usr/bin/python2.4
-import asyncspread, time, sys
-
+import time, sys
+sys.path.append('.')
+import asyncspread
 
 def ping_response(success, elapsed):
     print 'Client PING callback: Success=', success

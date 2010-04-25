@@ -17,7 +17,9 @@ Client PING callback: Success= True
 
 I'm slowly removing lots of debug output, but haven't yet switched the code over to using the logging module.  A higher priority is to fix up the main loop to be less stupid, and easier to work with for both non-threaded and threaded environments.
 
+...
 
+I'm now working on a new SpreadPingListener, which has me scratching my head because now the ping() method belongs in the SpreadPingListener class... It's definitely weird to have the ping() implemented in a \*Listener class... Listeners shouldn't speak... I'm going to finish moving the ping() code out of the main AsyncSpread class, and then take a second look at where it best belongs.  The code is sprouting new classes all over the place, so I'm nervous about adding any more classes that only serve to be 'pure'.  Instead, I might look for a different adjective than "Listener" and call it something else, like Processor or Manager...  I'm thinking a lot.
 
 === April 8, 2010 ===
 

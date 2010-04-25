@@ -1,6 +1,7 @@
 #!/usr/bin/python
-import asyncspread, time, sys
-
+import time, sys
+sys.path.append('.')
+import asyncspread
 class MyListener(asyncspread.SpreadListener):
     def handle_ping(self, success, elapsed):
         print '*** PONG:  Success:', success, ' Elapsed:', elapsed

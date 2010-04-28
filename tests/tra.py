@@ -11,17 +11,17 @@ def ping_response(success, elapsed):
 def mesg_cb(mesg):
     print '*** Got message:', mesg.data
 
-listener = asyncspread.SpreadListener()
+listener = asyncspread.SpreadPingListener()
 
 myname = 'tra-%06d' % (int(time.time()*100) % 1000)
 print 'I am', myname
 #myname = ''
-sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data = mesg_cb, listener=listener)
+sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener)
 sp.start_connect()
 sp.join(['gr1', 'gr2', 'abc123', 'def'])
 while True:
     print 'client top of loop'
-    sp.ping(ping_response)
+    listener.ping(sp, ping_response)
     sp.loop(150)
 
 #sp.connect()

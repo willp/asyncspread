@@ -145,14 +145,13 @@ class SpreadMessageFactory(object):
 
     def process_groups(self, groups):
         this_mesg = self.this_mesg
-        assert (this_mesg is not None, 'Message Factory invoked out of order.')
+        assert this_mesg is not None, 'Message Factory invoked out of order.'
         this_mesg._set_grps(groups)
         return this_mesg
 
     def process_data(self, data):
         this_mesg = self.this_mesg
-        if this_mesg is None:
-            return None # TODO: raise exception?
+        assert this_mesg is not None, 'Message Factory invoked out of order.'
         this_mesg._set_data(data)
         return this_mesg
 
@@ -203,12 +202,10 @@ class SpreadListener(object):
     def __init__(self):
         self.groups = dict()
 
-    def handle_data(self, conn, message):
-        print '!-!-!  SpreadListener:  Received message:', message
-
-    def handle_membership(self, conn, message):
+    def _process_membership(self, conn, message):
         '''Do not over-ride this method unless you plan on implementing an alternate
-        mechanism for tracking group membership changes.'''
+        mechanism for tracking group membership changes.  In which case, you must also
+        over-ride update_group_membership()'''
         print '!-!-!  SpreadListener:  Received MEMBERSHIP message:', message
         # regardless of message type (join/leave/disconnect/network), calculate membership changes
         self.update_group_membership(message)
@@ -226,7 +223,7 @@ class SpreadListener(object):
             self.handle_group_start(group, new_membership)
             return
         old_membership = self.groups[group]
-        if (isinstance(message, LeaveMessage) and message.self_leave) or len(membership) == 0:
+        if (isinstance(message, LeaveMessage) and message.self_leave) or len(new_membership) == 0:
             del self.groups[group]
             self.handle_group_end(group, old_membership)
             return
@@ -235,7 +232,7 @@ class SpreadListener(object):
         self.groups[group] = new_membership
         cause = type(message)
         for member in differences:
-            if member not in old_members:
+            if member not in old_membership:
                 # this is an add
                 self.handle_group_join(group, member, cause)
             else:
@@ -245,8 +242,16 @@ class SpreadListener(object):
     def get_group_members(self, group):
         return self.groups[group]
 
+    def _process_data(self, conn, message):
+        # not sure if this method is really needed...
+        self.handle_data(conn, message)
+
+    def handle_data(self, conn, message):
+        print '!-!-!  SpreadListener:  Received message:', message
+
     def handle_group_start(self, group, membership):
         print '0> New Group Joined', group, 'members:', membership
+        pass
 
     def handle_group_trans(self, group):
         print '0> Transitional message received, not much actionable here. Group:', group
@@ -263,9 +268,53 @@ class SpreadListener(object):
         print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
         pass
 
+class SpreadPingListener(SpreadListener):
+    ping_mtype = 0xffff # set to None if you want to disable ping processing
+
+    def __init__(self):
+        SpreadListener.__init__(self)
+        # PING vars
+        # IDs for mapping pings back to requests (overkill, I know)
+        self.ping_callbacks = dict()
+        self.ping_id = 0
+
+    def _process_data(self, conn, message):
+        data = message.data
+        if message.mesg_type == self.ping_mtype and message.sender == conn.private_name:
+            (head, ping_id, timestamp) = data.split(':')
+            ping_id = int(ping_id)
+            elapsed = time.time() - float(timestamp)
+            # pings expire:
+            if ping_id not in self.ping_callbacks:
+                print '999> LATE PING ARRIVED.  Ignoring it. Elapsed:', elapsed
+                return
+            else:
+                (ping_cb, send_time, timeout) = self.ping_callbacks.pop(ping_id)
+                ping_cb (True, elapsed)
+                return
+        print '999> Got a data message'
+        self.handle_data(conn, message)
+
+    def handle_group_join(self, group, member, cause):
+        print '999> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+
+    def handle_ping(self, success, elapsed):
+        print '*** 999 PONG:  Success:', success, ' Elapsed:', elapsed
+
+    def ping(self, conn, callback, timeout=30):
+        if True:#self.debug:
+            print 'Sending PING to myself'
+        payload='PING:%d:%.8f'
+        this_id = self.ping_id
+        self.ping_id += 1 # not thread-safe here
+        payload = payload % (this_id, time.time())
+        mesg_type = self.ping_mtype
+        self.ping_callbacks[this_id] = (callback, time.time(), timeout)
+        conn.unicast(conn.private_name, payload, mesg_type)
+
 
 class AsyncSpread(asynchat.async_chat):
-
+    '''Asynchronous client API for Spread 4.x group messaging.'''
     def __init__(self, name, host, port,
                  cb_dropped=None,
                  cb_connected=None,
@@ -274,12 +323,9 @@ class AsyncSpread(asynchat.async_chat):
                  priority_high=False,
                  debug=False,
                  log=None):
-        '''Represents an asynchronous connection to a spread daemon.
-        '''
+        '''Create object representing asynchronous connection to a spread daemon.'''
         asynchat.async_chat.__init__(self)
-        self.name = name
-        self.host = host
-        self.port = port
+        self.name, self.host, self.port = name, host, port
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
         self.debug = debug
@@ -294,9 +340,6 @@ class AsyncSpread(asynchat.async_chat):
         self.ibuffer = ''
         self.ibuffer_start = 0
         self.msg_count = 0
-        #
-        self.do_reflection = True # False = don't reflect my messages back to myself
-        self.reflected_drops = 0
         # more settings
         self.queue_joins = []
         self.dead = False
@@ -310,11 +353,6 @@ class AsyncSpread(asynchat.async_chat):
             self.struct_hdr = _struct_hdr.unpack
         except: # py2.4 support here
             self.struct_hdr = self._unpack_header
-        # PING vars
-        # IDs for mapping pings back to requests (overkill, I know)
-        self.ping_callbacks = dict()
-        self.ping_id = 0
-        self.ping_mtype = 0xffff # set to None if you want to disable ping processing
 
     def start_connect(self, timeout=5):
         self.mfactory = SpreadMessageFactory()
@@ -366,9 +404,6 @@ class AsyncSpread(asynchat.async_chat):
             raise(IOError('Connection lost to server'))
         asyncore.loop(timeout=timeout, count=1)
 
-#    def add_group_callback(self, group, cb_data, cb_membership=None):
-#        self.cb_by_group[group] = (cb_data, cb_membership)
-
     def wait_for_connection(self, timeout=10, sleep_delay=0.1):
         '''Spend time in self.poll() until the timeout expires, or we are connected, whichever first.
         Return boolean indicating if we are connected yet.  Or not.'''
@@ -379,6 +414,7 @@ class AsyncSpread(asynchat.async_chat):
         return self.private_name is not None
 
     def _check_timeouts(self):
+        return
         timeouts = []
         now = time.time()
         for ping_id, cb_items in self.ping_callbacks.iteritems():
@@ -403,9 +439,9 @@ class AsyncSpread(asynchat.async_chat):
         listener = self.listener
         if listener is not None:
             if isinstance(message, MembershipMessage):
-                listener.handle_membership(self, message)
+                listener._process_membership(self, message)
             else:
-                listener.handle_data(self, message)
+                listener._process_data(self, message)
 
     def collect_incoming_data(self, data):
         '''Buffer the data'''
@@ -433,7 +469,7 @@ class AsyncSpread(asynchat.async_chat):
             self.dead = True
             self.close()
             self.connected = False
-            raise SpreadException(authlen)
+            raise SpreadException(authlen) # TODO: cannot raise here, invoke error callback
         self.wait_bytes(authlen, self.st_auth_process)
 
     def st_auth_process(self, data):
@@ -441,7 +477,7 @@ class AsyncSpread(asynchat.async_chat):
         if 'NULL' not in methods: # add 'IP' support at some point
             print 'ERROR, cannot handle non-NULL authentication: "%s"' % (data)
             self._drop()
-            return
+            return # TODO: invoke error callback
         msg_auth = struct.pack('90s', 'NULL')
         self.wait_bytes(1, self.st_read_session)
         self.push(msg_auth)
@@ -452,7 +488,7 @@ class AsyncSpread(asynchat.async_chat):
         if accept != 1:
             print 'Failed authentication / connection:', accept
             self._drop()
-            raise SpreadException(accept) # TODO: FAIL
+            raise SpreadException(accept) # TODO: cannot raise here, invoke error callback
         self.wait_bytes(3, self.st_read_version)
 
     def st_read_version(self, data):
@@ -463,7 +499,7 @@ class AsyncSpread(asynchat.async_chat):
         version = (majorVersion | minorVersion | patchVersion)
         if version == -1: # when does this happen? does it?
             self._drop()
-            raise SpreadException(version) # TODO: FAIL
+            raise SpreadException(version) # TODO: cannot raise here, invoke error callback
         self.server_version = (majorVersion, minorVersion, patchVersion)
         self.wait_bytes(1, self.st_read_private_name)
 
@@ -473,7 +509,7 @@ class AsyncSpread(asynchat.async_chat):
         (group_len,) = struct.unpack('b', data)
         if group_len == -1:
             self._drop()
-            raise SpreadException(group_len) # TODO: FAIL
+            raise SpreadException(group_len) # TODO: cannot raise here, invoke error callback
         self.wait_bytes(group_len, self.st_set_private)
 
     def st_set_private(self, data):
@@ -487,10 +523,10 @@ class AsyncSpread(asynchat.async_chat):
     def st_read_header(self, data):
         if self.debug:
             print '\nSTATE: st_read_header'
-        ENDIAN_TEST = 0x80000080
         (svc_type, sender, num_groups, mesg_type, mesg_len) = self.struct_hdr(data)
         #print 'Decoded header:',(svc_type, sender, num_groups, mesg_type, mesg_len)
         # TODO: add code to flip endianness of svc_type and mesg_type if necessary (independently?)
+        ENDIAN_TEST = 0x80000080
         endian_wrong = (svc_type & ENDIAN_TEST) == 0
         svc_type &= ~ENDIAN_TEST
         mesg_type &= ~ENDIAN_TEST
@@ -501,9 +537,7 @@ class AsyncSpread(asynchat.async_chat):
             sender = sender[0:tail_null]
         if self.debug:
             print 'Svc type: 0x%04x  sender="%s"  mesg_type: 0x%08x   num_groups: %d   mesg_len: %d' % (svc_type, sender, mesg_type, num_groups, mesg_len)
-        # build up the SpreadMessage object...
-        self.this_svcType = svc_type
-        # pass header to message factory
+        # pass header to message factory to build up the SpreadMessage
         factory_mesg = self.mfactory.process_header(svc_type, mesg_type, sender, num_groups, mesg_len)
         if self.debug:
             print '> mesg_type = %d and hex 0x%04x' % (mesg_type, mesg_type)
@@ -522,7 +556,6 @@ class AsyncSpread(asynchat.async_chat):
         return
 
     def st_read_groups(self, data):
-        # OLD: SpreadProto.GROUP_FMT * self.mfactory.num_groups # could pre-calculate this if necessary
         group_packer = SpreadProto.GROUP_FMTS[self.mfactory.num_groups] # '32s' * len(gname)
         groups_padded = struct.unpack(group_packer, data)
         groups = grouplist_trim(groups_padded)
@@ -553,7 +586,7 @@ class AsyncSpread(asynchat.async_chat):
         # can have a couple of ways of doing this: explode out messages sent to multiple groups to multiple
         # callbacks?  or maybe even
         # Detect a ping to myself
-        if isinstance(factory_mesg, DataMessage) and factory_mesg.sender == self.private_name:
+        if False and isinstance(factory_mesg, DataMessage) and factory_mesg.sender == self.private_name:
             # message to myself!
             if factory_mesg.mesg_type == self.ping_mtype:
                 (head, ping_id, timestamp) = data.split(':')
@@ -567,10 +600,6 @@ class AsyncSpread(asynchat.async_chat):
                     (ping_cb, send_time, timeout) = self.ping_callbacks.pop(ping_id)
                     ping_cb (True, elapsed)
                     return
-            # else, my own message reflected back to me. Check anti-reflection configuration:
-            if not self.do_reflection:
-                self.reflected_drops += 1
-                return
 
     def st_read_memb_change(self, data):
         self.msg_count += 1
@@ -631,17 +660,6 @@ class AsyncSpread(asynchat.async_chat):
     def unicast(self, group, message, mesg_type):
         '''alias for multicasting to a single group, but disables SELF_DISCARD'''
         return self.multicast([group], message, mesg_type, self_discard=False)
-
-    def ping(self, callback, timeout=30):
-        if self.debug:
-            print 'Sending PING to myself'
-        payload='PING:%d:%.8f'
-        this_id = self.ping_id
-        self.ping_id += 1 # not thread-safe here
-        payload = payload % (this_id, time.time())
-        mesg_type = 0xffff
-        self.ping_callbacks[this_id] = (callback, time.time(), timeout)
-        self.unicast(self.private_name, payload, mesg_type)
 
 
 class SpreadException(Exception):

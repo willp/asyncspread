@@ -2,7 +2,7 @@
 import time, sys
 sys.path.append('.')
 import asyncspread
-class MyListener(asyncspread.SpreadListener):
+class MyListener(asyncspread.SpreadPingListener):
     def handle_ping(self, success, elapsed):
         print '*** PONG:  Success:', success, ' Elapsed:', elapsed
 
@@ -17,7 +17,7 @@ def mesg_cb(mesg):
 
 listener = MyListener() # asyncspread.SpreadListener()
 myname = 'ts-%s' % (int(time.time()*10) % 1000)
-sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, cb_data=mesg_cb, debug=True, listener=listener)
+sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, debug=True, listener=listener)
 ret = sp.start_connect()
 
 print 'Connected?', ret
@@ -35,7 +35,7 @@ for i in xrange(1, 35):
     else:
         sp.multicast(groups, 'Test message number %d' % (i), ((i*100) % 65535))
     if i % 10 == 9:
-        sp.ping(ping_cb, 5)
+        listener.ping(sp, ping_cb, 5)
     print 'sent off my messages for iteration %d' % (i)
     if i % 10 == 3:
         sp.join(['gr1'])

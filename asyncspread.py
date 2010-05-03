@@ -2,32 +2,18 @@
 import socket, struct, copy, asyncore, asynchat, time, logging
 from collections import deque
 
-# basic API methods:
+# This code is released for use under the Gnu Public License V3 (GPLv3).
 #
-# Constructor: (myname, host, port)
+# Thanks to Qingfeng for the initial version of code that inspired this re-write.
 #
-# connect(want_membership_info, want_priority)
+# Thanks to Spread Concepts, LLC., especially Amir Yair and Jonathan Stanton for
+# the Spread toolkit.
 #
-# join([groups])
-# - joins a list of groups
+# Please accept my humble apologies for this code being somewhat disorganized.
 #
-# leave([groups])
-# - leaves a list of groups
+# It is a work in progress!
 #
-# multicast(message, groups[], mesg_type, svc_type)
-# - send off a message to one or more groups
-#
-# ping(callback, timeout, payload, mesg_type, svc_type)
-# - sends a message to my connections' private name and ensures it
-# is received.
-#
-# optimized methods:
-# a way to pre-generate as much of a header as possible for a given
-# set of groups plus the mesgtype, maybe it's a class that produces
-# byte strings (header+payload) when you pass a payload into a
-# method.
-#
-#
+# Author:  "J. Will Pierce" <willp@nuclei.com>
 
 class ServiceTypes(object):
     # Classes of service:
@@ -372,7 +358,8 @@ class AsyncSpread(asynchat.async_chat):
         self.push(msg_connect)
 
     def handle_close(self):
-        print 'CONNECTION CLOSED! LOST CONNECTION TO THE SERVER!'
+        if self.debug:
+            print 'CONNECTION CLOSED! LOST CONNECTION TO THE SERVER!'
         self.dead = True
         self.private_name = None
         self.mfactory = None

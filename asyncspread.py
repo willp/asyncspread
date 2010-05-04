@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import socket, struct, copy, asyncore, asynchat, time, logging
+import socket, struct, copy, asyncore, asynchat, time, logging, sys
 from collections import deque
 
 # This code is released for use under the Gnu Public License V3 (GPLv3).
@@ -14,6 +14,13 @@ from collections import deque
 # It is a work in progress!
 #
 # Author:  "J. Will Pierce" <willp@nuclei.com>
+
+class NullHandler(logging.Handler):
+    def emit(self, record):
+        pass
+
+null_log = NullHandler()
+logging.getLogger("asyncspread").addHandler(null_log)
 
 class ServiceTypes(object):
     # Classes of service:
@@ -61,6 +68,28 @@ class SpreadProto(object):
     KILL_PKT = struct.pack('!I', ServiceTypes.KILL)
     SEND_PKT = struct.pack('!I', ServiceTypes.SEND)
     SEND_SELFDISCARD_PKT = struct.pack('!I', ServiceTypes.SEND | ServiceTypes.SELF_DISCARD)
+
+    @staticmethod
+    def protocol_create(svcType, mesgtype, pname, gname, data_len=0):
+        #print 'protocol_Create(len(svctype)=%d, mesgtype=%s, pname=%s, gnames=%s, data_len=%d)' % (len(svcType), mesgtype, pname, gname, data_len)
+        mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
+        msg_hdr = struct.pack('>32sI4sI', pname, len(gname), mesgtype_str, data_len)
+        grp_tag  = SpreadProto.GROUP_FMTS[len(gname)] # '32s' * len(gname)
+        grp_hdr = struct.pack(grp_tag, *gname)
+        hdr = ''.join((svcType, msg_hdr, grp_hdr))
+        return hdr
+
+    @staticmethod
+    def protocol_connect(my_name, membership_notifications=True, priority_high=False):
+        name_len = len(my_name)
+        mem_opts = 0x00
+        if membership_notifications:
+            mem_opts |= 0x01
+        if priority_high:
+            mem_opts |= 0x10
+        connect_fmt = '!5B%ds' % name_len
+        #print 'connect_fmt:', connect_fmt, 'args', (4, 1, 0, mem_opts, name_len, my_name)
+        return struct.pack(connect_fmt, 4, 1, 0, mem_opts, name_len, my_name)
 
 class SpreadMessage(object):
     def _set_data(self, data):
@@ -228,9 +257,38 @@ class SpreadListener(object):
     def get_group_members(self, group):
         return self.groups[group]
 
+    # a series of _process* methods that in just call their respective (overriden?) handle_* versions
+    # these are here to make it easier for subclasses to override handle_* and permit
+    # future enhancements to the base class, similar to how _process_membership() does
+    # bookkeeping, before calling handle_*() methods
+
     def _process_data(self, conn, message):
         # not sure if this method is really needed...
         self.handle_data(conn, message)
+
+    def _process_connected(self, conn):
+        self.handle_connected(conn)
+
+    def _process_authenticated(self, conn):
+        self.handle_authenticated(conn)
+
+    def _process_error(self, conn, exc):
+        self.handle_error(conn, exc)
+
+    def _process_dropped(self, conn):
+        self.handle_dropped(conn)
+
+    def handle_connected(self, conn):
+        print '0> Got connected!'
+
+    def handle_dropped(self, conn):
+        print '0> Lost connection!'
+
+    def handle_authenticated(self, conn):
+        print '0> Got authenticated, new session is ready!'
+
+    def handle_error(self, conn, exc):
+        print '0> Got error! Exception:', type(exc), exc
 
     def handle_data(self, conn, message):
         print '!-!-!  SpreadListener:  Received message:', message
@@ -302,8 +360,6 @@ class SpreadPingListener(SpreadListener):
 class AsyncSpread(asynchat.async_chat):
     '''Asynchronous client API for Spread 4.x group messaging.'''
     def __init__(self, name, host, port,
-                 cb_dropped=None,
-                 cb_connected=None,
                  listener=None,
                  membership_notifications=True,
                  priority_high=False,
@@ -315,10 +371,7 @@ class AsyncSpread(asynchat.async_chat):
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
         self.debug = debug
-        self.log = log # not yet used
-        # optional args, callbacks
-        self.cb_connected = cb_connected
-        self.cb_dropped = cb_dropped
+        self.logger = logging.getLogger() # not yet used
         self.listener = listener # general listener
         #
         self.private_name = None
@@ -353,9 +406,10 @@ class AsyncSpread(asynchat.async_chat):
         return struct.unpack(SpreadProto.HEADER_FMT, payload)
 
     def handle_connect(self):
-        msg_connect = protocol_connect(self.name, self.membership_notifications, self.priority_high)
+        msg_connect = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
         self.wait_bytes(1, self.st_auth_read)
         self.push(msg_connect)
+        self.listener._process_connected(self)
 
     def handle_close(self):
         if self.debug:
@@ -364,8 +418,15 @@ class AsyncSpread(asynchat.async_chat):
         self.private_name = None
         self.mfactory = None
         self.close()
-        if self.cb_dropped is not None:
-            self.cb_dropped(self)
+        self.listener._process_dropped(self)
+
+    def handle_error(self):
+        (exc_type, exc_val, tb) = sys.exc_info()
+        self.logger.debug ('LOGGER!  Got exception: %s' % exc_val)
+        self._drop()
+        #exc = SpreadException(-2)
+        print 'Invoking listeners _process_error with:', self, ' and:', exc_val
+        self.listener._process_error(self, exc_val)
 
     def loop(self, count=None, timeout=0.1, expire_every=10):
         main_loop = 0
@@ -388,8 +449,10 @@ class AsyncSpread(asynchat.async_chat):
 
     def poll(self, timeout=0.001):
         if self.dead:
-            raise(IOError('Connection lost to server'))
+            #raise(IOError('Connection lost to server')) # is this ok?
+            return False
         asyncore.loop(timeout=timeout, count=1)
+        return True
 
     def wait_for_connection(self, timeout=10, sleep_delay=0.1):
         '''Spend time in self.poll() until the timeout expires, or we are connected, whichever first.
@@ -397,6 +460,8 @@ class AsyncSpread(asynchat.async_chat):
         time_end = time.time() + timeout
         while not self.private_name and time.time() < time_end:
             self.poll(timeout/100)
+            if self.dead:
+                return False
             time.sleep(sleep_delay)
         return self.private_name is not None
 
@@ -420,6 +485,7 @@ class AsyncSpread(asynchat.async_chat):
 
     def _drop(self):
         self.dead = True
+        self.connected = False
         self.close()
 
     def _dispatch(self, message):
@@ -453,17 +519,17 @@ class AsyncSpread(asynchat.async_chat):
         (authlen,) = struct.unpack('b', data)
         if authlen < 0:
             print 'FAILED AUTHENTICATION TO SERVER: name collision?'
-            self.dead = True
-            self.close()
-            self.connected = False
-            raise SpreadException(authlen) # TODO: cannot raise here, invoke error callback
+            self._drop()
+            self.listener._process_error(self, SpreadException(authlen) )
+            return
         self.wait_bytes(authlen, self.st_auth_process)
 
     def st_auth_process(self, data):
-        methods= data.rstrip().split(' ') # space delimited?
+        methods = data.rstrip().split(' ') # space delimited?
         if 'NULL' not in methods: # add 'IP' support at some point
             print 'ERROR, cannot handle non-NULL authentication: "%s"' % (data)
             self._drop()
+            self.listener._process_error(self, SpreadException(-9) )# TODO: cannot raise here, invoke error callback
             return # TODO: invoke error callback
         msg_auth = struct.pack('90s', 'NULL')
         self.wait_bytes(1, self.st_read_session)
@@ -475,7 +541,9 @@ class AsyncSpread(asynchat.async_chat):
         if accept != 1:
             print 'Failed authentication / connection:', accept
             self._drop()
-            raise SpreadException(accept) # TODO: cannot raise here, invoke error callback
+            self.listener._process_error(self, SpreadException(accept) )# TODO: cannot raise here, invoke error callback
+            #raise SpreadException(accept) # TODO: cannot raise here, invoke error callback
+            return
         self.wait_bytes(3, self.st_read_version)
 
     def st_read_version(self, data):
@@ -486,7 +554,9 @@ class AsyncSpread(asynchat.async_chat):
         version = (majorVersion | minorVersion | patchVersion)
         if version == -1: # when does this happen? does it?
             self._drop()
-            raise SpreadException(version) # TODO: cannot raise here, invoke error callback
+            self.listener._process_error(self, SpreadException(version) )# TODO: cannot raise here, invoke error callback
+            #raise SpreadException(version) # TODO: cannot raise here, invoke error callback
+            return
         self.server_version = (majorVersion, minorVersion, patchVersion)
         self.wait_bytes(1, self.st_read_private_name)
 
@@ -496,15 +566,16 @@ class AsyncSpread(asynchat.async_chat):
         (group_len,) = struct.unpack('b', data)
         if group_len == -1:
             self._drop()
-            raise SpreadException(group_len) # TODO: cannot raise here, invoke error callback
+            self.listener._process_error(self, SpreadException(group_len) )# TODO: cannot raise here, invoke error callback
+            #raise SpreadException(group_len) # TODO: cannot raise here, invoke error callback
+            return
         self.wait_bytes(group_len, self.st_set_private)
 
     def st_set_private(self, data):
         if self.debug:
             print 'STATE: st_set_private'
         self.private_name = data
-        if self.cb_connected is not None:
-            self.cb_connected(self)
+        self.listener._process_authenticated(self)
         self.wait_bytes(48, self.st_read_header)
 
     def st_read_header(self, data):
@@ -600,18 +671,18 @@ class AsyncSpread(asynchat.async_chat):
             print 'WARNING: no private channel name known yet from server... queueing up group join for:', groups
             self.queue_joins.extend(groups)
             return False
-        send_head = protocol_create(SpreadProto.JOIN_PKT, 0, self.private_name, groups, 0)
+        send_head = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.private_name, groups, 0)
         self.push(send_head)
         return True
 
     def leave(self, groups):
-        send_head = protocol_create(SpreadProto.LEAVE_PKT, 0, self.private_name, groups, 0)
+        send_head = SpreadProto.protocol_create(SpreadProto.LEAVE_PKT, 0, self.private_name, groups, 0)
         self.push(send_head)
         return True
 
     def disconnect(self):
         who = self.private_name
-        send_head = protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
+        send_head = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
         self.push(send_head)
         self._drop()
         return True
@@ -638,7 +709,7 @@ class AsyncSpread(asynchat.async_chat):
             svc_type_pkt = SpreadProto.SEND_SELFDISCARD_PKT
         else:
             svc_type_pkt = SpreadProto.SEND_PKT
-        header = protocol_create(svc_type_pkt, mesg_type, self.private_name, groups, data_len)
+        header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.private_name, groups, data_len)
         payload = struct.pack('%ss' % data_len, message)
         pkt = ''.join((header, payload))
         self.push(pkt)
@@ -650,7 +721,9 @@ class AsyncSpread(asynchat.async_chat):
 
 
 class SpreadException(Exception):
-    '''SpreadException class from pyspread code by Quinfeng.'''
+    '''SpreadException class from pyspread code by Quinfeng.
+    Note: This should be a smaller set of exception classes that map to
+    categories of problems, instead of this enumerated list of errno strings.'''
     errors = {-1: 'ILLEGAL_SPREAD',
         -2: 'COULD_NOT_CONNECT',
         -3: 'REJECT_QUOTA',
@@ -671,29 +744,15 @@ class SpreadException(Exception):
 
     def __init__(self, errno):
         Exception.__init__(self)
-        self.err_msg = SpreadException.errors.get(errno, 'unrecognized error')
-        print 'SpreadException: %s' % (self.err_msg)
+        self.errno = errno
+        self.msg = SpreadException.errors.get(errno, 'unrecognized error')
 
-# Should move these into SpreadProto?
-def protocol_create(svcType, mesgtype, pname, gname, data_len=0):
-    #print 'protocol_Create(len(svctype)=%d, mesgtype=%s, pname=%s, gnames=%s, data_len=%d)' % (len(svcType), mesgtype, pname, gname, data_len)
-    mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
-    msg_hdr = struct.pack('>32sI4sI', pname, len(gname), mesgtype_str, data_len)
-    grp_tag  = SpreadProto.GROUP_FMTS[len(gname)] # '32s' * len(gname)
-    grp_hdr = struct.pack(grp_tag, *gname)
-    hdr = ''.join((svcType, msg_hdr, grp_hdr))
-    return hdr
+    def __str__(self):
+        return ('SpreadException(%d) # %s' % (self.errno, self.msg))
 
-def protocol_connect(my_name, membership_notifications=True, priority_high=False):
-    name_len = len(my_name)
-    mem_opts = 0x00
-    if membership_notifications:
-        mem_opts |= 0x01
-    if priority_high:
-        mem_opts |= 0x10
-    connect_fmt = '!5B%ds' % name_len
-    #print 'connect_fmt:', connect_fmt, 'args', (4, 1, 0, mem_opts, name_len, my_name)
-    return struct.pack(connect_fmt, 4, 1, 0, mem_opts, name_len, my_name)
+    def __repr__(self):
+        return (self.__str__())
+
 
 def grouplist_trim(groups):
     '''Trim padded nulls from list of fixed-width strings, return as new list'''

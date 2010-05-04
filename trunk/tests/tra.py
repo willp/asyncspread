@@ -1,7 +1,14 @@
-#!/usr/bin/python2.4
-import time, sys
+#!/usr/bin/python2.6
+import time, sys, logging
 sys.path.append('.')
 import asyncspread
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
+logger.addHandler(ch)
 
 def ping_response(success, elapsed):
     print 'Client PING callback: Success=', success
@@ -19,7 +26,7 @@ print 'I am', myname
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener)
 sp.start_connect()
 sp.join(['gr1', 'gr2', 'abc123', 'def'])
-while True:
+while sp.connected:
     print 'client top of loop'
     listener.ping(sp, ping_response)
     sp.loop(150)

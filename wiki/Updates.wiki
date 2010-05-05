@@ -2,6 +2,46 @@
 
 = Latest News =
 
+=== May 5, 2010 ===
+
+There's a lot to report this time.  The listener class(es) are working great, and the core protocol code is getting even tighter, plus I added a major bugfix and API change with join/leave, that only can handle one group at a time.  Here's the svn commit log which has more details:
+
+big fix- join and leave only REALLY work for a single group at a time, i had to look in the server source (session.c) to see that the daemon really only looks at the first group given in a join or leave message.  that bug lingered for a long time. wow.
+
+also, finished removing the ping timeout functionality and have a periodic call into the listener's _process_timer() method where the SpreadPingListener performs ping timeouts
+
+added ping send/recv packet counters, so you can get "packet loss" stats.
+
+i also realized that the "SEND" packet value was really the RELIABLE_MESS value, so I have a new (small) can of worms to fix- how to best handle changing the service_type (the reliability class) among: UNRELIABLE, RELIABLE, FIFO, CAUSAL, AGREED, SAFE... It needs to remain efficient, but also be simple and easy to modify.  I am leaning towards a .set_default_service(SpreadProto.RELIABLE_MESS) method, which calculates the packed int for that level, and for the "noreflect" version.
+
+I'm also thinking that I need to add more debug statements to help application developers troubleshoot at the application level. this is still an idea in progress though.
+
+I also hope to try out some multiple inheritance to mix together a ping listener with a debug listener... or provide some mechanism for easily adding debug behavior to any listener.
+
+through continued refactoring, i was able to completely remove the st_read_memb_change() state, since it was identical, line for line, with the read message body method, now that membership changes are calculated entirely in the listener.
+
+i also converted almost ALL debug output to logging module logger.debug() calls and added a nullhandler log object (as recommended by the logging module docs).
+
+wired up the asyncore handle_error() method, so that it now calls the users (listener's) handle_error() method, passing the exception object in the same way the SpreadException object is sent!  This looks super clean now.  It even clears the exceptions there too. Neat. I expect I'll need to add a traceback object of some sort down the road...  Ehhh, later.
+
+Added docs to constructor for AsyncSpread. Removed useless instance variables (group membership dict, start_time). Started to clean up the tra/ts test scripts.
+
+and from the previous commit:
+
+removed cb_dropped and cb_connect callbacks, instead am calling the listener's _process_\* methods, which then invoke local handle_\* methods
+
+also, added new handle_error (and _process_error) which replaces the ill suited raise SpreadException() calls that were sprinkled throughout the handshake and connection processing code.  this is starting to look really clean now.
+
+made first stab at properly doing logging using the logging module... this may be tricky for a little while, to make sure the library plays well as a library.
+
+also i realized the SpreadException class desparately needs to be subclassed into categories, with perhaps an errcode -> exception class lookup map to make it easier to map spread errno to exception classes.  i think maybe 3 classes overall will be needed, connection level errors, protocol version/authentication errors, and others.  we'll see, it's not a high priority though.
+
+the pinglistener code is still messy, and i've made no progress on filterchain style (MINA inspired) processing.  plus, the ping expiration part is just disabled for now, so i have to figure out a way to hook onto or implement a timer resource/callback from the poll/loop back to the listener, so it can spend time doing work if needed.
+
+thread safety is another concern that weighs heavily.  i'll get there.
+
+
+
 === April 25, 2010 ===
 
 Finally finished migrating the message processing to the new Factory approach.  The new code is so much cleaner, it's a relief.  The SpreadListener base class is finally usable, but I still have the "self-ping" functionality buried in the AsyncSpread class, which has to change.  I'm thrilled that some long-duration testing has proved the reliability of this code.  Various versions of the code have been running non-stop for weeks, without any failures or unhandled exceptions.  The TCP connection to the Spread daemon is super reliable.  No issues there.

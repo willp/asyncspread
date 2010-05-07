@@ -22,6 +22,9 @@ class MyListener(asyncspread.SpreadPingListener):
     def handle_data(self, conn, message):
         print 'Got message:', message
 
+    def handle_timer(self, conn):
+        print 'Client level timer invoked'
+
 #listener = asyncspread.SpreadPingListener()
 listener = MyListener()
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener)

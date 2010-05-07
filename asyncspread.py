@@ -224,38 +224,42 @@ class SpreadListener(object):
         '''Do not over-ride this method unless you plan on implementing an alternate
         mechanism for tracking group membership changes.  In which case, you must also
         over-ride update_group_membership()'''
-        print '!-!-!  SpreadListener:  Received MEMBERSHIP message:', message
+        #print '!-!-!  SpreadListener:  Received MEMBERSHIP message:', message
         # regardless of message type (join/leave/disconnect/network), calculate membership changes
-        self.update_group_membership(message)
+        self.update_group_membership(conn, message)
 
-    def update_group_membership(self, message):
+    def update_group_membership(self, conn, message):
         group = message.group
         if isinstance(message, TransitionalMessage):
-            self.handle_group_trans(group)
+            self.handle_group_trans(conn, group)
             return
         new_membership = set(message.members)
-        print '0> Update Group Membership: group "%s" now has members:' % (group), new_membership
+        #print '0> Update Group Membership: group "%s" now has members:' % (group), new_membership
         # new group!
         if not self.groups.has_key(group):
             self.groups[group] = new_membership
-            self.handle_group_start(group, new_membership)
+            self.handle_group_start(conn, group, new_membership)
             return
         old_membership = self.groups[group]
         if (isinstance(message, LeaveMessage) and message.self_leave) or len(new_membership) == 0:
             del self.groups[group]
-            self.handle_group_end(group, old_membership)
+            self.handle_group_end(conn, group, old_membership)
             return
         # now compute differences
         differences = old_membership ^ new_membership # symmetric difference
         self.groups[group] = new_membership
         cause = type(message)
+        # notify if we have a network split event
+        if isinstance(message, NetworkMessage):
+            changes = len(new_membership) - len(old_membership)
+            self.handle_network_split(conn, group, changes, old_membership, new_membership)
         for member in differences:
             if member not in old_membership:
                 # this is an add
-                self.handle_group_join(group, member, cause)
+                self.handle_group_join(conn, group, member, cause)
             else:
                 # this is a leave/departure
-                self.handle_group_leave(group, member, cause)
+                self.handle_group_leave(conn, group, member, cause)
 
     def get_group_members(self, group):
         return self.groups[group]
@@ -292,35 +296,44 @@ class SpreadListener(object):
     def handle_connected(self, conn):
         pass # print '0> Got connected!'
 
-    def handle_dropped(self, conn):
-        print '0> Lost connection!'
-
     def handle_authenticated(self, conn):
-        print '0> Got authenticated, new session is ready!'
+        #print '0> Got authenticated, new session is ready!'
+        pass
 
     def handle_error(self, conn, exc):
-        print '0> Got error! Exception:', type(exc), exc
+        #print '0> Got error! Exception:', type(exc), exc
+        pass
+
+    def handle_dropped(self, conn):
+        #print '0> Lost connection!'
+        pass
 
     def handle_data(self, conn, message):
-        print '0> !-!-!  SpreadListener:  Received message:', message
-
-    def handle_group_start(self, group, membership):
-        print '0> New Group Joined', group, 'members:', membership
+        #print '0> !-!-!  SpreadListener:  Received message:', message
         pass
 
-    def handle_group_trans(self, group):
-        print '0> Transitional message received, not much actionable here. Group:', group
+    def handle_group_start(self, conn, group, membership):
+        #print '0> New Group Joined', group, 'members:', membership
         pass
 
-    def handle_group_end(self, group, old_membership):
-        print '0> Group no longer joined:', group, 'Old membership:', old_membership
-
-    def handle_group_join(self, group, member, cause):
-        print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+    def handle_group_trans(self, conn, group):
+        #print '0> Transitional message received, not much actionable here. Group:', group
         pass
 
-    def handle_group_leave(self, group, member, cause):
-        print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
+    def handle_group_end(self, conn, group, old_membership):
+        #print '0> Group no longer joined:', group, 'Old membership:', old_membership
+        pass
+
+    def handle_group_join(self, conn, group, member, cause):
+        #print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+        pass
+
+    def handle_group_leave(self, conn, group, member, cause):
+        #print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
+        pass
+
+    def handle_network_split(self, conn, group, changes, old_membership, new_membership):
+        #print '0> Network Split event, group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
         pass
 
 class SpreadPingListener(SpreadListener):
@@ -354,9 +367,10 @@ class SpreadPingListener(SpreadListener):
 
     def handle_timer(self, conn):
         '''moved check_timeouts() here'''
-        if len(self.ping_callbacks) == 0:
+        pending_pings = len(self.ping_callbacks)
+        if pending_pings == 0:
             return
-        print 'SpreadPingListener : handle_timer():  Checking for ping timeouts!'
+        print 'SpreadPingListener : handle_timer():  Checking for timeouts on %d pending pings!' % (pending_pings)
         timeouts = []
         now = time.time()
         for ping_id, cb_items in self.ping_callbacks.iteritems():
@@ -372,9 +386,6 @@ class SpreadPingListener(SpreadListener):
                 user_cb(False, elapsed)
             except: pass
 
-    def handle_ping(self, success, elapsed):
-        print '*** PONG:  Success:', success, ' Elapsed:', elapsed
-
     def ping(self, conn, callback, timeout=30):
         payload = 'PING:%d:%.8f'
         this_id = self.ping_id
@@ -385,10 +396,101 @@ class SpreadPingListener(SpreadListener):
         self.ping_sent += 1
         conn.unicast(conn.private_name, payload, mesg_type)
 
-class DebugListener(SpreadPingListener):
-    '''implement this. should be super verbose'''
-    pass
+class CallbackListener(SpreadListener):
+    '''A helper class for registering callbacks that are invoked on various events, and
+    permits a user to build an application without using any inheritance at all.  May fit
+    some applications better than other listeners.
 
+    May need to handle user exceptions specially in the handle_ methods...
+
+    There is some risk of this code being very boilerplate.  Oh well.  It's helper code.
+    '''
+    def __init__(self):
+        '''Creates a new callback listener.
+
+        @param auth: callback to be invoked as auth(listener, conn) when the session passes authenticated and the session is 'connected'
+        @param data: callback to be invoked as data(listener, conn, message) when a data message arrives
+        @param dropped: callback to be invoked as dropped(listener, conn) when the connection is dropped
+        @param error: callback to be invoked as error(listener, conn, exception) when an error happens
+        '''
+        SpreadListener.__init__(auth=None, data=None, dropped=None, error=None)
+        self.cb_auth = cb_auth
+        self.cb_data = data
+        self.cb_dropped = dropped
+        self.cb_error = error
+
+    def handle_authenticated(self, conn):
+        if self.cb_auth:
+            self.cb_auth(self, conn)
+
+    def handle_dropped(self, conn):
+        if self.cb_dropped:
+            self.cb_dropped(self, conn)
+
+    def handle_error(self, conn, exc):
+        if self.cb_error:
+            self.cb_error(self, conn, exc)
+
+    def handle_data(self, conn, message):
+        if self.cb_data:
+            self.cb_data(self, conn, message)
+
+    def handle_group_start(self, conn, group, membership):
+        print '0> New Group Joined', group, 'members:', membership
+
+    def handle_group_end(self, conn, group, old_membership):
+        print '0> Group no longer joined:', group, 'Old membership:', old_membership
+
+    def handle_group_join(self, conn, group, member, cause):
+        print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+
+    def handle_group_leave(self, conn, group, member, cause):
+        print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
+
+
+class DebugListener(SpreadListener):
+    '''super verbose'''
+
+    def handle_connected(self, conn):
+        print '0> Got connected!'
+
+    def handle_dropped(self, conn):
+        print '0> Lost connection!'
+
+    def handle_authenticated(self, conn):
+        print '0> Got authenticated, new session is ready!'
+
+    def handle_error(self, conn, exc):
+        print '0> Got error! Exception:', type(exc), exc
+
+    def handle_data(self, conn, message):
+        print '0> Received message:', message
+
+    def handle_group_start(self, conn, group, membership):
+        print '0> New Group Joined', group, 'members:', membership
+
+    def handle_group_trans(self, conn, group):
+        print '0> Transitional message received, not much actionable here. Group:', group
+
+    def handle_group_end(self, conn, group, old_membership):
+        print '0> Group no longer joined:', group, 'Old membership:', old_membership
+
+    def handle_group_join(self, conn, group, member, cause):
+        print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+
+    def handle_group_leave(self, conn, group, member, cause):
+        print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
+
+    def handle_network_split(self, conn, group, changes, old_membership, new_membership):
+        print '0> Network Split event, group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
+
+    def handle_timer(self, conn):
+        print '0> Timer tick...'
+        # now invoke any parent class handle_timer() method too
+        try:
+            super(DebugListener, self).handle_timer(conn)
+        except:
+            print '000> Parent class threw an exception in handle_timer()'
 
 class AsyncSpread(asynchat.async_chat):
     '''Asynchronous client API for Spread 4.x group messaging.'''
@@ -397,6 +499,8 @@ class AsyncSpread(asynchat.async_chat):
                  membership_notifications=True,
                  priority_high=False):
         '''Create object representing asynchronous connection to a spread daemon.
+
+        TODO: Add keepalive socket support!
 
         @param name: your unique self-identifier, no more than 10 characters long, unique to this server
         @type name: str

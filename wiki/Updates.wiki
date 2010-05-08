@@ -6,9 +6,9 @@
 
 This update is exciting.  I'm getting so much closer to being able to release this code, I can nearly taste it.  Bit by bit, I'm resolving the problems and adding more functionality.  It's getting exciting now.  This is going to become my first PYPI release, so I'm aiming to make this as good as I can.
 
-In the latest big commit, I fixed all of the group handler_ methods so they include the connection object, which makes the handler_() methods more uniform.
+In the latest big commit, I fixed all of the group handler_ methods so they include the connection object, which makes the handler\_() methods more uniform.
 
-Added a new handler for handle_network_split() which is invoked whenever a NetworkMessage is received, regardless of it being a split or an unsplit.  The args passed to the handler are pretty helpful, I think: the size of the change (positive or negative delta), the old membership set(), and the new membership set().  This handler is invoked _before_ the indidivual handle_group_leave() or handle_group_join() calls.  This should be quite useful for any client that needs to do special work on a network split.
+Added a new handler for handle_network_split() which is invoked whenever a NetworkMessage is received, regardless of it being a split or an unsplit.  The args passed to the handler are pretty helpful, I think: the size of the change (positive or negative delta), the old membership set(), and the new membership set().  This handler is invoked _before_ the individual handle\_group\_leave() or handle\_group\_join() calls.  This should be quite useful for any client that needs to do special work on a network split.
 
 I also pulled out all the debug statements and made a new listener class: DebugSpreadListener, which you can use with multiple inheritance to add debug output to some other listener.  It may not be viable, but it works better than I expected.
 

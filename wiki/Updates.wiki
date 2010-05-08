@@ -2,6 +2,22 @@
 
 = Latest News =
 
+=== May 8, 2010 ===
+
+This update is exciting.  I'm getting so much closer to being able to release this code, I can nearly taste it.  Bit by bit, I'm resolving the problems and adding more functionality.  It's getting exciting now.  This is going to become my first PYPI release, so I'm aiming to make this as good as I can.
+
+In the latest big commit, I fixed all of the group handler_ methods so they include the connection object, which makes the handler_() methods more uniform.
+
+Added a new handler for handle_network_split() which is invoked whenever a NetworkMessage is received, regardless of it being a split or an unsplit.  The args passed to the handler are pretty helpful, I think: the size of the change (positive or negative delta), the old membership set(), and the new membership set().  This handler is invoked _before_ the indidivual handle_group_leave() or handle_group_join() calls.  This should be quite useful for any client that needs to do special work on a network split.
+
+I also pulled out all the debug statements and made a new listener class: DebugSpreadListener, which you can use with multiple inheritance to add debug output to some other listener.  It may not be viable, but it works better than I expected.
+
+I realized that not everyone really wants to code up a new class just to deal with a spread connection, so I'm working on a CallbackListener which wouldn't be subclassed at all.  Instead, a user would instantiate a CallbackListener, give it some callbacks for various events, and register more callbacks for messages.  This CallbackListener might even be useful as a subclass to other Listener classes that do various forms of message routing to code based on different criteria, like group->callback, or mesg_type->callback, or combinations: group+mesg_type -> callback.  This is where it gets terribly interesting.
+
+Another enhancement that I realized I need to make is to add the magic of TCP KEEPALIVE to the asynchat socket, as an optional (enabled) action in the AsyncSpread class.  This will ensure that a connection to spread _will_ be terminated if the network becomes a black hole.  This is gravy, but valuable gravy.  It's pretty easy to add, and puts zero extra load on the remote spread process.  The only load it adds is low rates of network traffic that are handled purely by the operating systems of either side of the connection.  The client process and daemon process aren't involved.
+
+I've also tested the spread client over a high latency connection to the spread daemon, and it works nicely.  I'll run some more long-duration tests to see if it stays up for days.
+
 === May 5, 2010 ===
 
 There's a lot to report this time.  The listener class(es) are working great, and the core protocol code is getting even tighter, plus I added a major bugfix and API change with join/leave, that only can handle one group at a time.  Here's the svn commit log which has more details:

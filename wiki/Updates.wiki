@@ -2,6 +2,32 @@
 
 = Latest News =
 
+=== May 15, 2010 ===
+
+I've added in the TCP keepalive support, which was pretty straightforward.  I looked at the packets with tcpdump -vv and it's really clear that the kernel is doing the right thing.  The default behavior is to enable TCP keepalive, and the timers are set to deliver a keepalive packet once every 10 seconds, and to consider the connection as broken when 6 keepalive packets are not acknowledged by the far end, so it's a 1-minute timeout.  This puts an upper bound on the maximum time that a connection can be black-holed by a misbehaving NAT or firewall.  Keep alives are really lightweight and are implemented at the OS level, so this feature will cause no increase in CPU to the server or the client application processes.  The bandwidth is minimal (52 bytes in each direction, once every 10 seconds is ~42 bits/sec and 0.1 packets/second, very cheap!).
+
+Here is a packet trace showing the TCP keepalive packets over a 30 second period of time between my client running on IP 10.0.1.184, talking to a server at "x.y.z".net:24999:
+{{{
+15:35:32.644512 IP (tos 0x0, ttl 64, id 30653, offset 0, flags [DF], proto TCP (6), length 52)
+    10.0.1.184.57700 > x.y.z.net.24999: Flags [.], cksum 0xed1d (correct), seq 2183, ack 1032, win 92, options [nop,nop,TS val 108396278 ecr 1737950730], length 0
+15:35:32.737345 IP (tos 0x20, ttl 47, id 52421, offset 0, flags [DF], proto TCP (6), length 52)
+    x.y.z.net.24999 > 10.0.1.184.57700: Flags [.], cksum 0xecf2 (correct), seq 1032, ack 2184, win 175, options [nop,nop,TS val 1737960819 ecr 108386148], length 0
+
+15:35:42.736511 IP (tos 0x0, ttl 64, id 30654, offset 0, flags [DF], proto TCP (6), length 52)
+    10.0.1.184.57700 > x.y.z.net.24999: Flags [.], cksum 0x9e48 (correct), seq 2183, ack 1032, win 92, options [nop,nop,TS val 108406370 ecr 1737960819], length 0
+15:35:42.824810 IP (tos 0x20, ttl 47, id 52422, offset 0, flags [DF], proto TCP (6), length 52)
+    x.y.z.net.24999 > 10.0.1.184.57700: Flags [.], cksum 0xc585 (correct), seq 1032, ack 2184, win 175, options [nop,nop,TS val 1737970912 ecr 108386148], length 0
+
+15:35:52.824642 IP (tos 0x0, ttl 64, id 30655, offset 0, flags [DF], proto TCP (6), length 52)
+    10.0.1.184.57700 > x.y.z.net.24999: Flags [.], cksum 0x4f73 (correct), seq 2183, ack 1032, win 92, options [nop,nop,TS val 108416458 ecr 1737970912], length 0
+15:35:52.909005 IP (tos 0x20, ttl 47, id 52423, offset 0, flags [DF], proto TCP (6), length 52)
+    x.y.z.net.24999 > 10.0.1.184.57700: Flags [.], cksum 0x9e1f (correct), seq 1032, ack 2184, win 175, options [nop,nop,TS val 1737980998 ecr 108386148], length 0
+
+}}}
+
+I'm going to finish up the CallbackListener class and also completely rejigger the way the 'SEND_PKT' is built, with the new call to set the reliability level of messages.  The SpreadProto class will grow from this work.  More news coming soon.
+
+
 === May 8, 2010 ===
 
 This update is exciting.  I'm getting so much closer to being able to release this code, I can nearly taste it.  Bit by bit, I'm resolving the problems and adding more functionality.  It's getting exciting now.  This is going to become my first PYPI release, so I'm aiming to make this as good as I can.

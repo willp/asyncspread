@@ -31,6 +31,7 @@ Ok, I've finished the CallbackListener, which looks pretty clean, amazingly.  On
 
 Now I'm working on making the code thread safe.  This may be more effort than it is worth for the first pass.  But I'm giving it a shot anyways.  The code currently explodes pretty quickly when two threads both enter the asyncore.loop() method, raising a `<socket._socketobject object at 0xb745e95c> Exception: deque index out of range` error.  This isn't surprising because asyncore itself is not thread-safe.  I'm adding a deque() that will be used instead of the self.push() calls in the public facing methods of join(), leave(), multicast() and disconnect().  There may be some really tricky edge cases, especially when the connection is dropped... I want to make it super-easy to use and support both threaded _and_ non-threaded uses.
 
+Wow, adding thread-safety took 5 minutes.  A single collections.deque() object, a boolean flag, and a helper method (_send()) to invoke instead of push() that knows how to send the data, and a do_io() method is all it took.  Amazing.  I'm surprised.
 
 === May 8, 2010 ===
 

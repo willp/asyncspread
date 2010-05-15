@@ -25,7 +25,11 @@ Here is a packet trace showing the TCP keepalive packets over a 30 second period
 
 }}}
 
-I'm going to finish up the CallbackListener class and also completely rejigger the way the 'SEND_PKT' is built, with the new call to set the reliability level of messages.  The SpreadProto class will grow from this work.  More news coming soon.
+I'm going to finish up the CallbackListener class and also completely rejigger the way the 'SEND_PKT' is built, with the new call to set the reliability level of messages.  The SpreadProto class will grow from this work.
+
+Ok, I've finished the CallbackListener, which looks pretty clean, amazingly.  One thing that's a little weird is the possible expansion of a message that was sent to multiple groups into multiple group data callbacks.  I like it, but it sure could be hard to troubleshoot if you're not expecting a single message to trigger multiple callbacks.
+
+Now I'm working on making the code thread safe.  This may be more effort than it is worth for the first pass.  But I'm giving it a shot anyways.  The code currently explodes pretty quickly when two threads both enter the asyncore.loop() method, raising a `<socket._socketobject object at 0xb745e95c> Exception: deque index out of range` error.  This isn't surprising because asyncore itself is not thread-safe.  I'm adding a deque() that will be used instead of the self.push() calls in the public facing methods of join(), leave(), multicast() and disconnect().  There may be some really tricky edge cases, especially when the connection is dropped... I want to make it super-easy to use and support both threaded _and_ non-threaded uses.
 
 
 === May 8, 2010 ===

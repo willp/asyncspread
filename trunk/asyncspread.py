@@ -80,7 +80,7 @@ class SpreadProto(object):
 
     @staticmethod
     def protocol_create(svcType, mesgtype, pname, gname, data_len=0):
-        print 'protocol_Create(len(svctype)=%d, mesgtype=%s, pname=%s, gnames=%s, data_len=%d)' % (len(svcType), mesgtype, pname, gname, data_len)
+        #print 'protocol_Create(len(svctype)=%d, mesgtype=%s, pname=%s, gnames=%s, data_len=%d)' % (len(svcType), mesgtype, pname, gname, data_len)
         mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
         msg_hdr = struct.pack('>32sI4sI', pname, len(gname), mesgtype_str, data_len)
         grp_tag  = SpreadProto.GROUP_FMTS[len(gname)] # '32s' * len(gname)
@@ -642,32 +642,30 @@ class AsyncSpread(asynchat.async_chat):
         thr.daemon=True
         thr.start()
 
-    def do_io(self, forever=False):
+    def do_io(self, forever=False, timer_interval=1):
         self.io_active = True
         main_loop = 0
         if self.dead:
             # wait
             print 'self.DEAD in IO thread...'
-        timer_next = time.time() + 1
+        timer_next = time.time() + timer_interval
         while not self.dead or forever:
             main_loop += 1
             # spend some time in asyncore event loop
             if not self.dead:
-                asyncore.loop(timeout=0.0001, count=5, use_poll=True)
+                asyncore.loop(timeout=0.01, count=50, use_poll=True)
             # then do some timer tasks
             if time.time() >= timer_next:
                 self.listener._process_timer(self)
-                timer_next = time.time() + 1
+                timer_next = time.time() + timer_interval
             # then do a reconnect if requested
             if self.dead and self.do_reconnect:
                 self.do_reconnect = False # reset flag
                 print 'IO thread trying to start_connect()...'
                 self.start_connect()
-            #print 'Waiting for io_ready to be set() true...'
             # make sure not to deliver any messages if the session isn't ready
             if not self.io_ready.isSet():
-                print 'IO not ready! waiting 1 second for IO to be ready'
-                self.io_ready.wait(1)
+                print 'IO not ready!'
                 continue
             # deliver queued up outbound data
             while len(self.out_queue) > 0 and not self.dead and self.private_name is not None:

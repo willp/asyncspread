@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import socket, struct, copy, asyncore, asynchat, time, logging, sys
+import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading
 from collections import deque
 
 # This code is released for use under the Gnu Public License V3 (GPLv3).
@@ -16,10 +16,8 @@ from collections import deque
 
 class NullLogHandler(logging.Handler):
     '''Log null handler for polite logging'''
-    def emit(self, record):
-        pass
-
-logging.getLogger("asyncspread").addHandler(NullLogHandler())
+    def emit(self, record): pass
+logging.getLogger().addHandler(NullLogHandler())
 
 class ServiceTypes(object):
     # Classes of service:
@@ -34,7 +32,7 @@ class ServiceTypes(object):
     JOIN = 0x00010000
     LEAVE = 0x020000
     KILL = 0x00040000
-    #SEND = 0x00000002
+
     SEND = SAFE_MESS
     SELF_DISCARD = 0x00000040 # A flag to disable refelction back of one's own message
     SEND_NOREFLECT = SEND | SELF_DISCARD
@@ -59,8 +57,8 @@ class SpreadProto(object):
     # Pre-create some format strings
     # Don't send to more than MAX_GROUPS groups at once, increase if necessary
     MAX_GROUPS = 1000
-    GROUP_FMTS = [ GROUP_FMT * i for i in xrange(MAX_GROUPS) ]
     # This list will consume 1000*3 = 3 KB, plus overhead.  Worth it to spend the RAM.
+    GROUP_FMTS = [ GROUP_FMT * i for i in xrange(MAX_GROUPS) ]
 
     # Encoded message headers
     JOIN_PKT = struct.pack('!I', ServiceTypes.JOIN)
@@ -71,6 +69,14 @@ class SpreadProto(object):
 
     # Handshake message parts
     AUTH_PKT = struct.pack('90s', 'NULL')
+
+    def __init__(self):
+        self.set_level()
+    
+    def set_level(self, default_type=ServiceTypes.SAFE_MESS):
+        self.default_type = default_type
+        self.send_pkt = struct.pack('!I', default_type)
+        self.send_pkt_selfdisc = struct.pack('!I', default_type | ServiceTypes.SELF_DISCARD)
 
     @staticmethod
     def protocol_create(svcType, mesgtype, pname, gname, data_len=0):
@@ -224,7 +230,6 @@ class SpreadListener(object):
         '''Do not over-ride this method unless you plan on implementing an alternate
         mechanism for tracking group membership changes.  In which case, you must also
         over-ride update_group_membership()'''
-        #print '!-!-!  SpreadListener:  Received MEMBERSHIP message:', message
         # regardless of message type (join/leave/disconnect/network), calculate membership changes
         self.update_group_membership(conn, message)
 
@@ -234,7 +239,6 @@ class SpreadListener(object):
             self.handle_group_trans(conn, group)
             return
         new_membership = set(message.members)
-        #print '0> Update Group Membership: group "%s" now has members:' % (group), new_membership
         # new group!
         if not self.groups.has_key(group):
             self.groups[group] = new_membership
@@ -294,50 +298,40 @@ class SpreadListener(object):
         self.handle_dropped(conn)
 
     def handle_connected(self, conn):
-        pass # print '0> Got connected!'
+        pass
 
     def handle_authenticated(self, conn):
-        #print '0> Got authenticated, new session is ready!'
         pass
 
     def handle_error(self, conn, exc):
-        #print '0> Got error! Exception:', type(exc), exc
         pass
 
     def handle_dropped(self, conn):
-        #print '0> Lost connection!'
         pass
 
     def handle_data(self, conn, message):
-        #print '0> !-!-!  SpreadListener:  Received message:', message
         pass
 
     def handle_group_start(self, conn, group, membership):
-        #print '0> New Group Joined', group, 'members:', membership
         pass
 
     def handle_group_trans(self, conn, group):
-        #print '0> Transitional message received, not much actionable here. Group:', group
         pass
 
     def handle_group_end(self, conn, group, old_membership):
-        #print '0> Group no longer joined:', group, 'Old membership:', old_membership
         pass
 
     def handle_group_join(self, conn, group, member, cause):
-        #print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
         pass
 
     def handle_group_leave(self, conn, group, member, cause):
-        #print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
         pass
 
     def handle_network_split(self, conn, group, changes, old_membership, new_membership):
-        #print '0> Network Split event, group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
         pass
 
 class SpreadPingListener(SpreadListener):
-    ping_mtype = 0xffff # set to None if you want to disable ping processing
+    ping_mtype = 0xffff # change if necessary
 
     def __init__(self, check_interval=1):
         SpreadListener.__init__(self)
@@ -348,6 +342,7 @@ class SpreadPingListener(SpreadListener):
         # counters
         self.ping_sent = 0
         self.ping_recv = 0
+        self.ping_late = 0
 
     def _process_data(self, conn, message):
         data = message.data
@@ -355,9 +350,9 @@ class SpreadPingListener(SpreadListener):
             (head, ping_id, timestamp) = data.split(':')
             ping_id = int(ping_id)
             elapsed = time.time() - float(timestamp)
-            # pings expire:
+            # pings expire, handle late arrivals here
             if ping_id not in self.ping_callbacks:
-                #print '999> LATE PING ARRIVED.  Ignoring it. Elapsed:', elapsed
+                self.ping_late += 1
                 return
             (ping_cb, send_time, timeout) = self.ping_callbacks.pop(ping_id)
             self.ping_recv += 1
@@ -370,14 +365,13 @@ class SpreadPingListener(SpreadListener):
         pending_pings = len(self.ping_callbacks)
         if pending_pings == 0:
             return
-        print 'SpreadPingListener : handle_timer():  Checking for timeouts on %d pending pings!' % (pending_pings)
         timeouts = []
         now = time.time()
         for ping_id, cb_items in self.ping_callbacks.iteritems():
             (cb, time_sent, timeout) = cb_items
             expire = time_sent + timeout
             if now >= expire:
-                print 'EXPIRING ping id %d because now %.4f is > expire %.4f' % (ping_id, now, expire)
+                #print 'EXPIRING ping id %d because now %.4f is > expire %.4f' % (ping_id, now, expire)
                 timeouts.append(ping_id)
         for ping_id in timeouts:
             (user_cb, time_sent, timeout) = self.ping_callbacks.pop(ping_id)
@@ -396,6 +390,22 @@ class SpreadPingListener(SpreadListener):
         self.ping_sent += 1
         conn.unicast(conn.private_name, payload, mesg_type)
 
+class GroupCallback(object):
+    '''Container class for callbacks about a group.'''
+    def __init__(self,
+                 cb_data=None,
+                 cb_join=None,
+                 cb_leave=None,
+                 cb_network=None,
+                 cb_start=None,
+                 cb_end=None):
+        self.cb_data = cb_data
+        self.cb_join = cb_join
+        self.cb_leave = cb_leave
+        self.cb_network = cb_network
+        self.cb_start = cb_start
+        self.cb_end = cb_end
+
 class CallbackListener(SpreadListener):
     '''A helper class for registering callbacks that are invoked on various events, and
     permits a user to build an application without using any inheritance at all.  May fit
@@ -405,19 +415,32 @@ class CallbackListener(SpreadListener):
 
     There is some risk of this code being very boilerplate.  Oh well.  It's helper code.
     '''
-    def __init__(self):
+    def __init__(self, cb_auth=None, cb_data=None, cb_dropped=None, cb_error=None):
         '''Creates a new callback listener.
 
         @param auth: callback to be invoked as auth(listener, conn) when the session passes authenticated and the session is 'connected'
-        @param data: callback to be invoked as data(listener, conn, message) when a data message arrives
+        @param data: callback to be invoked as data(listener, conn, message) when any data message arrives on any group
         @param dropped: callback to be invoked as dropped(listener, conn) when the connection is dropped
         @param error: callback to be invoked as error(listener, conn, exception) when an error happens
         '''
-        SpreadListener.__init__(auth=None, data=None, dropped=None, error=None)
+        SpreadListener.__init__(self)
         self.cb_auth = cb_auth
-        self.cb_data = data
-        self.cb_dropped = dropped
-        self.cb_error = error
+        self.cb_data = cb_data
+        self.cb_dropped = cb_dropped
+        self.cb_error = cb_error
+        self.cb_groups = dict()
+
+    def set_group_cb(self, group, group_callback):
+        '''Only permit one GroupCallback object per group.  However, a message will be sent to multiple
+        group callbacks if the message is delivered to multiple groups, and those groups are set up with
+        callback objects.
+        
+        @param group: the name of the group for this callback
+        @type group: string
+        @param group_callback: the GroupCallback object containing the callbacks for this group
+        @type group_callback: GroupCallback
+        '''
+        self.cb_groups[group] = group_callback
 
     def handle_authenticated(self, conn):
         if self.cb_auth:
@@ -431,73 +454,89 @@ class CallbackListener(SpreadListener):
         if self.cb_error:
             self.cb_error(self, conn, exc)
 
+    # this function avoids a lot of boilerplate here, should also catch exceptions perhaps
+    def _invoke_cb(self, group, callback, args):
+        gcb = self.cb_groups.get(group, None)
+        if gcb:
+            cb_ref = getattr(gcb, callback)
+            if cb_ref:
+                cb_ref(*args)
+
     def handle_data(self, conn, message):
         if self.cb_data:
             self.cb_data(self, conn, message)
+        groups = message.groups
+        for group in groups:
+            self._invoke_cb(group, 'cb_data', (conn, message))
 
     def handle_group_start(self, conn, group, membership):
-        print '0> New Group Joined', group, 'members:', membership
+        self._invoke_cb(group, 'cb_start', (conn, group, membership))
 
     def handle_group_end(self, conn, group, old_membership):
-        print '0> Group no longer joined:', group, 'Old membership:', old_membership
+        self._invoke_cb(group, 'cb_end', (conn, group, old_membership))
 
     def handle_group_join(self, conn, group, member, cause):
-        print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+        self._invoke_cb(group, 'cb_join', (conn, group, member, cause))
 
     def handle_group_leave(self, conn, group, member, cause):
-        print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
+        self._invoke_cb(group, 'cb_leave', (conn, group, member, cause))
+
+    def handle_network_split(self, conn, group, changes, old_membership, new_membership):
+        self._invoke_cb(group, 'cb_network', (group, changes, old_membership, new_membership))
 
 
 class DebugListener(SpreadListener):
     '''super verbose'''
 
     def handle_connected(self, conn):
-        print '0> Got connected!'
+        print 'DEBUG: Got connected!'
 
     def handle_dropped(self, conn):
-        print '0> Lost connection!'
+        print 'DEBUG: Lost connection!'
 
     def handle_authenticated(self, conn):
-        print '0> Got authenticated, new session is ready!'
+        print 'DEBUG: Got authenticated, new session is ready!'
 
     def handle_error(self, conn, exc):
-        print '0> Got error! Exception:', type(exc), exc
+        print 'DEBUG: Got error! Exception:', type(exc), exc
 
     def handle_data(self, conn, message):
-        print '0> Received message:', message
+        print 'DEBUG: Received message:', message
 
     def handle_group_start(self, conn, group, membership):
-        print '0> New Group Joined', group, 'members:', membership
+        print 'DEBUG: New Group Joined', group, 'members:', membership
 
     def handle_group_trans(self, conn, group):
-        print '0> Transitional message received, not much actionable here. Group:', group
+        print 'DEBUG: Transitional message received, not much actionable here. Group:', group
 
     def handle_group_end(self, conn, group, old_membership):
-        print '0> Group no longer joined:', group, 'Old membership:', old_membership
+        print 'DEBUG: Group no longer joined:', group, 'Old membership:', old_membership
 
     def handle_group_join(self, conn, group, member, cause):
-        print '0> Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+        print 'DEBUG: Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
 
     def handle_group_leave(self, conn, group, member, cause):
-        print '0> Group Member Left group:', group, 'Member:', member, 'Cause:', cause
+        print 'DEBUG: Group Member Left group:', group, 'Member:', member, 'Cause:', cause
 
     def handle_network_split(self, conn, group, changes, old_membership, new_membership):
-        print '0> Network Split event, group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
+        print 'DEBUG: Network Split event, group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
 
     def handle_timer(self, conn):
-        print '0> Timer tick...'
+        print 'DEBUG: Timer tick...'
         # now invoke any parent class handle_timer() method too
         try:
             super(DebugListener, self).handle_timer(conn)
         except:
-            print '000> Parent class threw an exception in handle_timer()'
+            pass
+            print 'DEBUG: Parent class threw an exception in handle_timer()'
 
 class AsyncSpread(asynchat.async_chat):
     '''Asynchronous client API for Spread 4.x group messaging.'''
     def __init__(self, name, host, port,
                  listener=None,
                  membership_notifications=True,
-                 priority_high=False):
+                 priority_high=False, 
+                 keepalive=True):
         '''Create object representing asynchronous connection to a spread daemon.
 
         TODO: Add keepalive socket support!
@@ -518,8 +557,12 @@ class AsyncSpread(asynchat.async_chat):
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
         self.listener = listener # a SpreadListener
+        self.keepalive = keepalive
+        self.keepalive_idle = 10
+        self.keepalive_maxdrop = 6 # one minute
         # initialize some basics
         self.logger = logging.getLogger()
+        self.proto = SpreadProto()
         self.private_name = None
         self.ibuffer = ''
         self.ibuffer_start = 0
@@ -529,6 +572,8 @@ class AsyncSpread(asynchat.async_chat):
         self.dead = False
         self.need_bytes = 0
         self.mfactory = None
+        self.io_active = False
+        self.out_queue = deque() # outbound messages for threaded uses
         # optimization for python 2.5+
         try:
             _struct_hdr = struct.Struct(SpreadProto.HEADER_FMT) # precompiled
@@ -539,8 +584,21 @@ class AsyncSpread(asynchat.async_chat):
     def start_connect(self, timeout=10):
         self.mfactory = SpreadMessageFactory()
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        if self.keepalive:
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) # enable            
+                self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPIDLE, self.keepalive_idle)
+                self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPINTVL, self.keepalive_idle)
+                self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPCNT, self.keepalive_maxdrop)
+            except:
+                self.logger.info('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
+                self.keepalive = False
         self.connect((self.host, self.port))
         return self.wait_for_connection(timeout)
+
+    def set_level(self, level):
+        '''totally delegated to internal SpreadProto object'''
+        self.proto.set_level(level)
 
     def _unpack_header(self, payload):
         '''used for python < 2.5 where the struct module doesn't offer the
@@ -554,7 +612,7 @@ class AsyncSpread(asynchat.async_chat):
         self.listener._process_connected(self) # dubious utility here
 
     def handle_close(self):
-        self.logger.info('Connection lost to server.')
+        self.logger.info('Connection lost to server: %s:%d' % (self.host, self.port))
         self.dead = True
         self.private_name = None
         self.mfactory = None
@@ -567,11 +625,48 @@ class AsyncSpread(asynchat.async_chat):
         self._drop()
         sys.exc_clear()
         self.listener._process_error(self, exc_val)
+        self.listener._process_dropped(self)
 
+    def start_io_thread(self, forever=False):
+        thr = threading.Thread(target=self.do_io, args=(forever,), name='AsyncSpread I/O Thread')
+        thr.daemon=True
+        thr.start()        
+
+    def do_io(self, forever=False):
+        self.io_active = True
+        main_loop = 0
+        timer_next = time.time() + 1
+        while not self.dead or forever:
+            main_loop += 1
+            queue_len = len(self.out_queue)
+            if queue_len > 0:
+                print 'QUEUE-LENGTH:', queue_len
+                if not self.dead:
+                    while len(self.out_queue) > 0:
+                        self.push(self.out_queue.popleft())
+            if not self.dead:
+                asyncore.loop(timeout=0.1, count=1, use_poll=True)
+            if not self.dead and (self.private_name is not None and len(self.queue_joins) > 0):
+                self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
+                q_groups = self.queue_joins
+                self.queue_joins = []
+                self.join(q_groups)
+            # every N iterations, check for timed out pings
+            if time.time() >= timer_next:
+                self.listener._process_timer(self)
+                timer_next = time.time() + 1
+            if queue_len == 0:
+                time.sleep(0.0001) # max rate is 10000 msgs / second
+        print 'IO Thread exiting'
+        self.io_active = False
+    
     def loop(self, count=None, timeout=0.1, timer_interval=10):
         '''factor out expire_every into a generalized timer that calls up into listener'''
+        if self.io_active:
+            print 'ERROR: using loop() at same time as background IO thread is not valid/smart.'
+            raise IOError('Cannot do asyncore IO in two different threads')
         main_loop = 0
-        #self.listener._process_timer(self)
+        #self.listener._process_timer(self) #hmm, to do or not to do...
         while not self.dead and (count is None or main_loop < count):
             main_loop += 1
             asyncore.loop(timeout=timeout/5, count=5, use_poll=True)
@@ -745,6 +840,12 @@ class AsyncSpread(asynchat.async_chat):
         factory_mesg = self.mfactory.process_data(data)
         self._dispatch(factory_mesg)
 
+    def _send(self, data):
+        if self.io_active:
+            self.out_queue.append(data)
+        else:
+            self.push(data)
+
     # only works after getting connected
     def join(self, group):
         if self.private_name is None:
@@ -752,8 +853,7 @@ class AsyncSpread(asynchat.async_chat):
             self.queue_joins.append(group)
             return False
         send_head = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.private_name, [group], 0)
-        self.push(send_head)
-        print
+        self._send(send_head)
         return True
 
     def leave(self, group):
@@ -761,7 +861,7 @@ class AsyncSpread(asynchat.async_chat):
             self.logger.critical('No private channel name known yet from server... Failed leave() message')
             return False
         send_head = SpreadProto.protocol_create(SpreadProto.LEAVE_PKT, 0, self.private_name, [group], 0)
-        self.push(send_head)
+        self._send(send_head)
         return True
 
     def disconnect(self):
@@ -770,7 +870,7 @@ class AsyncSpread(asynchat.async_chat):
             return False
         who = self.private_name
         send_head = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
-        self.push(send_head)
+        self._send(send_head)
         self._drop()
         return True
 
@@ -792,12 +892,12 @@ class AsyncSpread(asynchat.async_chat):
         #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
         data_len = len(message)
         if self_discard:
-            svc_type_pkt = SpreadProto.SEND_SELFDISCARD_PKT
+            svc_type_pkt = self.proto.send_pkt_selfdisc # was: SpreadProto.SEND_SELFDISCARD_PKT
         else:
-            svc_type_pkt = SpreadProto.SEND_PKT
+            svc_type_pkt = self.proto.send_pkt # was: SpreadProto.SEND_PKT
         header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.private_name, groups, data_len)
         pkt = header + message
-        self.push(pkt)
+        self._send(pkt)
         return True
 
     def unicast(self, group, message, mesg_type):
@@ -837,11 +937,6 @@ class SpreadException(Exception):
 
     def __repr__(self):
         return (self.__str__())
-
-#### utility functions, not part of any class
-###def _grouplist_trim(groups):
-###    '''Trim padded nulls from list of fixed-width strings, return as new list'''
-###    return
 
 if __name__ == '__main__':
     # do some unit testing here... not easy to imagine without a server to talk to

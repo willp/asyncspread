@@ -28,8 +28,8 @@ class MyListener(asyncspread.SpreadPingListener):
 #listener = asyncspread.SpreadPingListener()
 listener = MyListener()
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener)
-#
 sp.start_connect()
+
 for g in ('gr1', 'gr2', 'abc123', 'def', 'group2'):
     sp.join(g)
 while sp.connected:

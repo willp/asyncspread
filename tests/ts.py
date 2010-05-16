@@ -71,9 +71,9 @@ for i in xrange(1, 160000):
         groups.append('gr3')
         groups.append('gr5')
     if i % 6 == 0:
-        sp.multicast(groups, '', ((i*101) % 65535))
+        sp.multicast(groups, '', ((i*101) % 65535), self_discard=False)
     else:
-        sp.multicast(groups, 'Test message number %d' % (i), ((i*100) % 0xffff))
+        sp.multicast(groups, 'Test message number %d' % (i), ((i*100) % 0xffff), self_discard=False)
 #    if i % 10 == 9:
 #        listener.ping(sp, ping_cb, 5)
 #    print 'sent off my messages for iteration %d' % (i)
@@ -84,10 +84,11 @@ for i in xrange(1, 160000):
     if i % 10 == 2:
         sp.leave('gr1')
         sp.join('gr2')
-        sp.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff)
-    sp.multicast(['gr1'], "A" * 9000, 0, self_discard=False) # send big message
+        sp.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff, self_discard=False)
+    sp.multicast(['gr1'], "A" * 900, 0, self_discard=False) # send big message
     #sp.loop(1)
     time.sleep(1)
+    print
 print 'Entering big long lasting loop...'
 time.sleep(120)
 #sp.loop(60000)

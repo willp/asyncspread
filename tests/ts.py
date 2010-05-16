@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import time, sys, logging, threading
+import time, sys, logging, threading, random
 sys.path.append('.')
 import asyncspread
 
@@ -11,7 +11,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-#setup_logging()
+setup_logging(logging.DEBUG)
 
 class MyListener(asyncspread.SpreadPingListener):
     def handle_ping(self, success, elapsed):
@@ -27,6 +27,10 @@ def auth_cb(listener, conn):
     print 'Got authenticated.'
 def drop_cb(listener, conn):
     print 'Client > DROPPED < CB:  conn:', conn
+    print 'Setting reconnect flag'
+    conn.do_reconnect = True
+    #ret = conn.start_connect()
+    #conn.start_io_thread()
 def err_cb(listener, conn, exc):
     print 'Client > ERROR <  CB: conn:', conn, 'Exception:', exc
 def data_cb(conn, message):
@@ -45,8 +49,8 @@ listener2.set_group_cb('gr1', asyncspread.GroupCallback(cb_data=data_cb,
                                     cb_join=join_leave_cb, cb_leave=join_leave_cb,
                                     cb_network=split_cb))
 myname = '\'%03d' % (int(time.time()*10) % 1000)
-myname = 'rb02'
-print 'My name is: "%s"' % myname
+myname = 'rb01'
+#print 'My name is: "%s"' % myname
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener2)
 sp.set_level(asyncspread.ServiceTypes.UNRELIABLE_MESS)
 ret = sp.start_connect()
@@ -54,12 +58,12 @@ ret = sp.start_connect()
 print 'Connected?', ret
 if ret:
     print 'my private name is:',sp.private_name
-    sp.start_io_thread()
+    sp.start_io_thread(forever=True)
 for g in ('gr1', 'group2', 'gr2', 'gr5'):
     sp.join(g)
 
 #sp.loop(1)
-for i in xrange(1, 16000):
+for i in xrange(1, 160):
     #if sp.dead:
     #    break
     groups = ['gr1']
@@ -83,7 +87,7 @@ for i in xrange(1, 16000):
         sp.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff)
     sp.multicast(['gr1'], "A" * 9000, 0, self_discard=False) # send big message
     #sp.loop(1)
-    time.sleep(0.0001)
+    time.sleep(1)
 print 'Entering big long lasting loop...'
 time.sleep(120)
 #sp.loop(60000)

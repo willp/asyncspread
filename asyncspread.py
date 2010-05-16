@@ -112,7 +112,7 @@ class DataMessage(SpreadMessage):
         self.mesg_type = mesg_type
         self.self_discarded = self_discarded
         self.groups = []
-        self.data = None
+        self.data = None # TODO: empty string may be a better choice here
 
     def _set_grps(self, groups):
         self.groups = groups
@@ -346,7 +346,7 @@ class SpreadPingListener(SpreadListener):
 
     def _process_data(self, conn, message):
         data = message.data
-        if message.mesg_type == self.ping_mtype and message.sender == conn.private_name:
+        if message.mesg_type == self.ping_mtype and message.sender == conn.private_name and data is not None: # change to empty string for default empty data?
             (head, ping_id, timestamp) = data.split(':')
             ping_id = int(ping_id)
             elapsed = time.time() - float(timestamp)
@@ -460,7 +460,10 @@ class CallbackListener(SpreadListener):
         if gcb:
             cb_ref = getattr(gcb, callback)
             if cb_ref:
-                cb_ref(*args)
+                try:
+                    cb_ref(*args)
+                except:
+                    print 'Exception in client callback'
 
     def handle_data(self, conn, message):
         if self.cb_data:
@@ -854,8 +857,10 @@ class AsyncSpread(asynchat.async_chat):
         if mesg_len > 0:
             self.wait_bytes(mesg_len, self.st_read_message)
             return
+        print 'about to _dispatch'
         # handle case of no message body, on self-leave
         self._dispatch(factory_mesg)
+        print 'about to wait_bytes'
         self.wait_bytes(48, self.st_read_header)
         return
 

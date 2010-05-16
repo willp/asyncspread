@@ -63,7 +63,7 @@ for g in ('gr1', 'group2', 'gr2', 'gr5'):
     sp.join(g)
 
 #sp.loop(1)
-for i in xrange(1, 160):
+for i in xrange(1, 160000):
     #if sp.dead:
     #    break
     groups = ['gr1']

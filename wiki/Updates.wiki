@@ -2,6 +2,12 @@
 
 = Latest News =
 
+=== May 16, 2010 ===
+
+I spent some time working with the new IO thread functionality, and though it actually works, it isn't exactly how I want to see it.  I thought a bit and realized that I need to make explicit the threaded usage, instead of relying on 'hints' from internal flags... This might even be time to subclass the AsyncSpread class (for the first time) to stick on the threading functionality, and properly override the methods that need thread-safety changes, so at instantiation-time a user selects the behavior they want, rather than by making runtime calls to do this or that (i.e. start up the IO thread).  It should be extremely explicit here, in what is happening.  That will clean up a lot of the ugliness that showed up with the threading support.  Ideally, asyncore and asynchat need to be thread-safe.  Perhaps in another life I'll take that task on.  Ah well.
+
+
+
 === May 15, 2010 ===
 
 I've added in the TCP keepalive support, which was pretty straightforward.  I looked at the packets with tcpdump -vv and it's really clear that the kernel is doing the right thing.  The default behavior is to enable TCP keepalive, and the timers are set to deliver a keepalive packet once every 10 seconds, and to consider the connection as broken when 6 keepalive packets are not acknowledged by the far end, so it's a 1-minute timeout.  This puts an upper bound on the maximum time that a connection can be black-holed by a misbehaving NAT or firewall.  Keep alives are really lightweight and are implemented at the OS level, so this feature will cause no increase in CPU to the server or the client application processes.  The bandwidth is minimal (52 bytes in each direction, once every 10 seconds is ~42 bits/sec and 0.1 packets/second, very cheap!).

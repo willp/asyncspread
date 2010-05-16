@@ -80,7 +80,7 @@ class SpreadProto(object):
 
     @staticmethod
     def protocol_create(svcType, mesgtype, pname, gname, data_len=0):
-        #print 'protocol_Create(len(svctype)=%d, mesgtype=%s, pname=%s, gnames=%s, data_len=%d)' % (len(svcType), mesgtype, pname, gname, data_len)
+        print 'protocol_Create(len(svctype)=%d, mesgtype=%s, pname=%s, gnames=%s, data_len=%d)' % (len(svcType), mesgtype, pname, gname, data_len)
         mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
         msg_hdr = struct.pack('>32sI4sI', pname, len(gname), mesgtype_str, data_len)
         grp_tag  = SpreadProto.GROUP_FMTS[len(gname)] # '32s' * len(gname)
@@ -573,6 +573,8 @@ class AsyncSpread(asynchat.async_chat):
         self.need_bytes = 0
         self.mfactory = None
         self.io_active = False
+        self.io_ready = threading.Event()
+        self.do_reconnect = False
         self.out_queue = deque() # outbound messages for threaded uses
         # optimization for python 2.5+
         try:
@@ -581,8 +583,7 @@ class AsyncSpread(asynchat.async_chat):
         except: # python <= 2.4 support
             self.struct_hdr = self._unpack_header
 
-    def start_connect(self, timeout=10):
-        self.mfactory = SpreadMessageFactory()
+    def _do_connect(self):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         if self.keepalive:
             try:
@@ -593,7 +594,13 @@ class AsyncSpread(asynchat.async_chat):
             except:
                 self.logger.info('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
                 self.keepalive = False
+        self.dead = False
         self.connect((self.host, self.port))
+
+    def start_connect(self, timeout=10):
+        self.mfactory = SpreadMessageFactory()
+        self._do_connect()
+        print 'waiting for connection...'
         return self.wait_for_connection(timeout)
 
     def set_level(self, level):
@@ -606,6 +613,7 @@ class AsyncSpread(asynchat.async_chat):
         return struct.unpack(SpreadProto.HEADER_FMT, payload)
 
     def handle_connect(self):
+        print 'handle_connect(): my name is:', self.name
         msg_connect = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
         self.wait_bytes(1, self.st_auth_read)
         self.push(msg_connect)
@@ -628,35 +636,49 @@ class AsyncSpread(asynchat.async_chat):
         self.listener._process_dropped(self)
 
     def start_io_thread(self, forever=False):
+        if self.io_active: # not thread safe, not really. race condition here.
+            return
         thr = threading.Thread(target=self.do_io, args=(forever,), name='AsyncSpread I/O Thread')
         thr.daemon=True
-        thr.start()        
+        thr.start()
 
     def do_io(self, forever=False):
         self.io_active = True
         main_loop = 0
+        if self.dead:
+            # wait
+            print 'self.DEAD in IO thread...'
         timer_next = time.time() + 1
         while not self.dead or forever:
             main_loop += 1
-            queue_len = len(self.out_queue)
-            if queue_len > 0:
-                print 'QUEUE-LENGTH:', queue_len
-                if not self.dead:
-                    while len(self.out_queue) > 0:
-                        self.push(self.out_queue.popleft())
+            # spend some time in asyncore event loop
             if not self.dead:
-                asyncore.loop(timeout=0.1, count=1, use_poll=True)
-            if not self.dead and (self.private_name is not None and len(self.queue_joins) > 0):
-                self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
-                q_groups = self.queue_joins
-                self.queue_joins = []
-                self.join(q_groups)
-            # every N iterations, check for timed out pings
+                asyncore.loop(timeout=0.0001, count=5, use_poll=True)
+            # then do some timer tasks
             if time.time() >= timer_next:
                 self.listener._process_timer(self)
                 timer_next = time.time() + 1
-            if queue_len == 0:
-                time.sleep(0.0001) # max rate is 10000 msgs / second
+            # then do a reconnect if requested
+            if self.dead and self.do_reconnect:
+                self.do_reconnect = False # reset flag
+                print 'IO thread trying to start_connect()...'
+                self.start_connect()
+            #print 'Waiting for io_ready to be set() true...'
+            # make sure not to deliver any messages if the session isn't ready
+            if not self.io_ready.isSet():
+                print 'IO not ready! waiting 1 second for IO to be ready'
+                self.io_ready.wait(1)
+                continue
+            # deliver queued up outbound data
+            while len(self.out_queue) > 0 and not self.dead and self.private_name is not None:
+                print 'QUEUE-LENGTH:', len(self.out_queue)
+                print '(IO SEND) writing to socket...'
+                self.push(self.out_queue.popleft())
+            # perform queued joins
+            if not self.dead and (self.private_name is not None and len(self.queue_joins) > 0):
+                self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
+                while len(self.queue_joins) > 0:
+                    self.join(self.queue_joins.pop())
         print 'IO Thread exiting'
         self.io_active = False
     
@@ -698,8 +720,13 @@ class AsyncSpread(asynchat.async_chat):
 
     def _drop(self):
         self.dead = True
+        self.io_ready.clear()
         self.connected = False
         self.close()
+        self.discard_buffers()
+        self.ibuffer = ''
+        self.ibuffer_start = 0
+        self.private_name = None
 
     def _dispatch(self, message):
         listener = self.listener
@@ -788,6 +815,7 @@ class AsyncSpread(asynchat.async_chat):
         self.logger.info('Spread session established to server: %s:%d, my private name is: "%s"' % (self.host, self.port, self.private_name))
         self.listener._process_authenticated(self)
         self.wait_bytes(48, self.st_read_header)
+        self.io_ready.set()
 
     def st_read_header(self, data):
         self.logger.debug('STATE: st_read_header')

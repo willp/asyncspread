@@ -16,6 +16,7 @@ Overall, the architecture consists of several classes:
   * SpreadMessageFactory - builds different SpreadMessage objects based on message headers
   * SpreadListener - base class for all listeners, its methods invoked by protocol events
   * SpreadPingListener - listener that implements a ping() send and handle_ping() response with user callbacks
+  * CallbackListener - listener that will route callbacks to group-specific callbacks and/or connection level events to conenction-level callbacks, does not require user to define any new subclasses or use inheritance at all.
   * SpreadException - a one-size-fits-all exception object for errors returned by the Spread daemon
 
 
@@ -31,8 +32,9 @@ To use AsyncSpread, you first subclass a listener class, like SpreadPingListener
   * handle_group_join() called when someone joins a group you are on, for any reason
   * handle_group_leave() called when someone leaves a group you are on, for any reason
   * handle_group_end() called when you get confirmation from the server on leaving a group
+  * handle_network_split() called when a group is split due to a spread-to-spread network or host issue, provides the old and new membership lists and the size of the delta (positive or negative)
   * handle_group_trans() called when the server sends a "transitional" membership message, not generally useful to most users. See spread docs about the reliability guarantees to know when this message will be sent by the server.
-  * handle_timer() called once in a while by the AsyncSpread loop() method, used by SpreadPingListener to implement ping request timeouts
+  * handle_timer() called once in a while by the AsyncSpread loop() method, used by SpreadPingListener to implement ping request timeouts.  (Interval is once per second, currently hard-coded)
 
 The SpreadListener also maintains group membership sets automatically, so you can always ask for the current group membership for any group that you have join()ed, using:
   * get_group_membership(group) - returns a set() of client private names that are current members of 'group'

@@ -339,18 +339,31 @@ class SpreadPingListener(SpreadListener):
         # IDs for mapping pings back to requests (overkill, I know)
         self.ping_callbacks = dict()
         self.ping_id = 0
+        self.clear_stats()
+
+    def clear_stats(self):
         # counters
         self.ping_sent = 0
         self.ping_recv = 0
         self.ping_late = 0
 
+    def pktloss(self):
+        if self.ping_sent == 0:
+            return 0
+        pktloss = self.ping_recv / self.ping_sent * 100.0
+        return pktloss
+
+
     def _process_data(self, conn, message):
         data = message.data
-        if message.mesg_type == self.ping_mtype and message.sender == conn.private_name and data is not None: # change to empty string for default empty data?
+        if (message.mesg_type == self.ping_mtype and
+            len(message.groups) == 1 and
+            message.sender == conn.private_name and
+            data is not None): # change to empty string for default empty data?
             (head, ping_id, timestamp) = data.split(':')
             ping_id = int(ping_id)
             elapsed = time.time() - float(timestamp)
-            # pings expire, handle late arrivals here
+            # pings expire, handle late arrivals here, devour silently
             if ping_id not in self.ping_callbacks:
                 self.ping_late += 1
                 return
@@ -383,7 +396,7 @@ class SpreadPingListener(SpreadListener):
     def ping(self, conn, callback, timeout=30):
         payload = 'PING:%d:%.8f'
         this_id = self.ping_id
-        self.ping_id += 1 # not thread-safe here
+        self.ping_id += 1 # not thread-safe here, also may wrap, oh well
         payload = payload % (this_id, time.time())
         mesg_type = self.ping_mtype
         self.ping_callbacks[this_id] = (callback, time.time(), timeout)
@@ -595,7 +608,7 @@ class AsyncSpread(asynchat.async_chat):
                 self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPINTVL, self.keepalive_idle)
                 self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPCNT, self.keepalive_maxdrop)
             except:
-                self.logger.info('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
+                self.logger.warning('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
                 self.keepalive = False
         self.dead = False
         self.connect((self.host, self.port))
@@ -603,7 +616,6 @@ class AsyncSpread(asynchat.async_chat):
     def start_connect(self, timeout=10):
         self.mfactory = SpreadMessageFactory()
         self._do_connect()
-        print 'waiting for connection...'
         return self.wait_for_connection(timeout)
 
     def set_level(self, level):
@@ -616,14 +628,14 @@ class AsyncSpread(asynchat.async_chat):
         return struct.unpack(SpreadProto.HEADER_FMT, payload)
 
     def handle_connect(self):
-        print 'handle_connect(): my name is:', self.name
+        self.logger.debug('handle_connect(): my name is: %s' % (self.name))
         msg_connect = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
         self.wait_bytes(1, self.st_auth_read)
         self.push(msg_connect)
         self.listener._process_connected(self) # dubious utility here
 
     def handle_close(self):
-        self.logger.info('Connection lost to server: %s:%d' % (self.host, self.port))
+        self.logger.warning('Connection lost to server: %s:%d' % (self.host, self.port))
         self.dead = True
         self.private_name = None
         self.mfactory = None
@@ -632,8 +644,8 @@ class AsyncSpread(asynchat.async_chat):
 
     def handle_error(self):
         (exc_type, exc_val, tb) = sys.exc_info()
-        self.logger.debug ('handle_error(): Got exception: %s' % exc_val)
-        traceback.print_exc(file=sys.stdout)
+        self.logger.warning('handle_error(): Got exception: %s' % exc_val)
+        self.logger.info('Traceback: ' + traceback.format_exc(file=sys.stdout))
         self._drop()
         sys.exc_clear()
         self.listener._process_error(self, exc_val)
@@ -845,6 +857,7 @@ class AsyncSpread(asynchat.async_chat):
             self.wait_bytes(mesg_len, self.st_read_message)
             return
         # At this point, we have a full message in factory_mesg, even though it has no groups or body
+        # Is this ever reached?
         self._dispatch(factory_mesg)
         self.wait_bytes(48, self.st_read_header)
         return
@@ -859,10 +872,8 @@ class AsyncSpread(asynchat.async_chat):
         if mesg_len > 0:
             self.wait_bytes(mesg_len, self.st_read_message)
             return
-        print 'about to _dispatch'
         # handle case of no message body, on self-leave
         self._dispatch(factory_mesg)
-        print 'about to wait_bytes'
         self.wait_bytes(48, self.st_read_header)
         return
 
@@ -883,7 +894,7 @@ class AsyncSpread(asynchat.async_chat):
     def join(self, group):
         if self.private_name is None:
             self.logger.warn('No private channel name known yet from server... queueing up group join for: %s' % (group))
-            self.queue_joins.append(group)
+            self.queue_joins.append(group) # TODO: Rethink this?
             return False
         send_head = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.private_name, [group], 0)
         self._send(send_head)
@@ -921,7 +932,7 @@ class AsyncSpread(asynchat.async_chat):
         '''
         if self.private_name is None:
             self.logger.critical('No private channel name known yet from server... Failed multicast message')
-            return False
+            return False # TODO: Consider raising exception?
         #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
         data_len = len(message)
         if self_discard:
@@ -936,11 +947,6 @@ class AsyncSpread(asynchat.async_chat):
     def unicast(self, group, message, mesg_type):
         '''alias for sending to a single destination, and disables SELF_DISCARD (in case it is a self ping)'''
         return self.multicast([group], message, mesg_type, self_discard=False)
-
-    def request_status(self, name):
-        svc_type_pkt = SpreadProto.STATUS_PKT
-        header = SpreadProto.protocol_create(svc_type_pkt, 0x00, name, [], 0)
-        self.push(header)
 
 class SpreadException(Exception):
     '''SpreadException class from pyspread code by Quinfeng.
@@ -967,7 +973,7 @@ class SpreadException(Exception):
     def __init__(self, errno):
         Exception.__init__(self)
         self.errno = errno
-        self.type = 'SpreadException'
+        self.type = 'SpreadException' # TODO: should be cleaner
         self.msg = SpreadException.errors.get(errno, 'unrecognized error')
 
     def __str__(self):
@@ -979,7 +985,7 @@ class SpreadException(Exception):
 class SpreadAuthException(SpreadException):
     def __init__(self, errno):
         SpreadException.__init__(self, errno)
-        self.type = 'SpreadAuthException'
+        self.type = 'SpreadAuthException' # TODO: clean up
 
 
 

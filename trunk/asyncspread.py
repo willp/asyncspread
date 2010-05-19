@@ -112,7 +112,7 @@ class DataMessage(SpreadMessage):
         self.mesg_type = mesg_type
         self.self_discarded = self_discarded
         self.groups = []
-        self.data = None # TODO: empty string may be a better choice here
+        self.data = None # TODO: empty string may be a better choice here!
 
     def _set_grps(self, groups):
         self.groups = groups
@@ -206,7 +206,7 @@ class SpreadMessageFactory(object):
                 self.this_mesg = NetworkMessage(sender)
                 return self.this_mesg
             # fall-thru error here, unknown cause!
-            print 'ERROR: unknown membership change CAUSE.  svc_type=0x%04x' % (svc_type)
+            print 'ERROR: unknown membership change CAUSE.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
         elif svc_type & ServiceTypes.CAUSED_BY_LEAVE:
             # self-LEAVE message!
             self.this_mesg = LeaveMessage(sender, True)
@@ -217,7 +217,7 @@ class SpreadMessageFactory(object):
             self.this_mesg = TransitionalMessage(sender)
             return self.this_mesg
         # fall-thru error here, unknown type
-        print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type)
+        print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
         self.this_mesg = None
         return None
 

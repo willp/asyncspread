@@ -14,7 +14,7 @@ def setup_logging(level=logging.INFO):
 def ping_response(success, elapsed):
     print 'Client PING callback: Success: %s.  Elapsed time: %.8f' % (success, elapsed)
 
-setup_logging()
+setup_logging(logging.DEBUG)
 myname = 'tra-%06d' % (int(time.time()*100) % 1000)
 print 'I am', myname
 #
@@ -30,10 +30,12 @@ listener = MyListener()
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener)
 sp.start_connect()
 
-for g in ('gr1', 'gr2', 'abc123', 'def', 'group2'):
+for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ'):
     sp.join(g)
+loop=0
 while sp.connected:
+    loop += 1
     print 'client top of loop'
-    sp.multicast(['gr2'], "my multicast", 0)
+    sp.multicast(['gr2', 'AZ'], 'my multicast num %d' % (loop), 0, self_discard=False)
     listener.ping(sp, ping_response)
     sp.loop(100)

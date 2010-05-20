@@ -23,7 +23,7 @@ class MyListener(asyncspread.SpreadPingListener):
         print 'Got message:', message
 
     def handle_timer(self, conn):
-        print 'Client level timer invoked'
+        pass
 
 #listener = asyncspread.SpreadPingListener()
 listener = MyListener()

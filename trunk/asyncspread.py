@@ -476,7 +476,7 @@ class CallbackListener(SpreadListener):
                 try:
                     cb_ref(*args)
                 except:
-                    print 'Exception in client callback'
+                    print 'Exception in client callback' # TODO: add traceback output here
 
     def handle_data(self, conn, message):
         if self.cb_data:
@@ -544,7 +544,7 @@ class DebugListener(SpreadListener):
             super(DebugListener, self).handle_timer(conn)
         except:
             pass
-            print 'DEBUG: Parent class threw an exception in handle_timer()'
+            print 'DEBUG: Parent class threw an exception in handle_timer()' # TODO: print traceback here
 
 class AsyncSpread(asynchat.async_chat):
     '''Asynchronous client API for Spread 4.x group messaging.'''
@@ -554,8 +554,6 @@ class AsyncSpread(asynchat.async_chat):
                  priority_high=False,
                  keepalive=True):
         '''Create object representing asynchronous connection to a spread daemon.
-
-        TODO: Add keepalive socket support!
 
         @param name: your unique self-identifier, no more than 10 characters long, unique to this server
         @type name: str
@@ -580,8 +578,7 @@ class AsyncSpread(asynchat.async_chat):
         self.logger = logging.getLogger()
         self.proto = SpreadProto()
         self.private_name = None
-        self.ibuffer = ''
-        self.ibuffer_start = 0
+        self._clear_ibuffer()
         self.msg_count = 0
         # more settings
         self.queue_joins = []
@@ -651,13 +648,14 @@ class AsyncSpread(asynchat.async_chat):
         self.listener._process_error(self, exc_val)
         self.listener._process_dropped(self)
 
-    def start_io_thread(self, forever=False):
+    def start_io_thread(self, forever=True):
         if self.io_active: # not thread safe, not really. race condition here.
             return
         thr = threading.Thread(target=self.do_io, args=(forever,), name='AsyncSpread I/O Thread')
         thr.daemon=True
         thr.start()
 
+    # is this only done in threaded apps? i think so...
     def do_io(self, forever=False, timer_interval=1):
         self.io_active = True
         main_loop = 0
@@ -732,19 +730,23 @@ class AsyncSpread(asynchat.async_chat):
             time.sleep(sleep_delay)
         return self.private_name is not None
 
+    def _clear_ibuffer(self):
+        self.ibuffer = ''
+        self.ibuffer_start = 0
+
     def _drop(self):
         self.dead = True
         self.io_ready.clear()
         self.connected = False
         self.close()
         self.discard_buffers()
-        self.ibuffer = ''
-        self.ibuffer_start = 0
+        self._clear_ibuffer()
         self.private_name = None
 
     def _dispatch(self, message):
         listener = self.listener
         if listener is not None:
+            # Listeners should not throw exceptions here
             if isinstance(message, MembershipMessage):
                 listener._process_membership(self, message)
             else:
@@ -827,7 +829,8 @@ class AsyncSpread(asynchat.async_chat):
     def st_set_private(self, data):
         self.logger.debug('STATE: st_set_private')
         self.private_name = data
-        self.logger.info('Spread session established to server: %s:%d, my private name is: "%s"' % (self.host, self.port, self.private_name))
+        self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
+        self.logger.info('My private name for this connection is: "%s"' % (self.private_name))
         self.listener._process_authenticated(self)
         self.wait_bytes(48, self.st_read_header)
         self.io_ready.set()
@@ -858,6 +861,7 @@ class AsyncSpread(asynchat.async_chat):
             return
         # At this point, we have a full message in factory_mesg, even though it has no groups or body
         # Is this ever reached?
+        self.logger.warning('Strange: message contains no body, and has no groups in header.  This should be exceedingly rare, if not impossible.')
         self._dispatch(factory_mesg)
         self.wait_bytes(48, self.st_read_header)
         return
@@ -948,11 +952,16 @@ class AsyncSpread(asynchat.async_chat):
         '''alias for sending to a single destination, and disables SELF_DISCARD (in case it is a self ping)'''
         return self.multicast([group], message, mesg_type, self_discard=False)
 
+class AsyncSpreadThreaded(AsyncSpread):
+    '''Threaded (technically thread-safe) subclass of AsyncSpread.
+    '''
+    pass
+
 class SpreadException(Exception):
     '''SpreadException class from pyspread code by Quinfeng.
     Note: This should be a smaller set of exception classes that map to
     categories of problems, instead of this enumerated list of errno strings.'''
-    errors = {-1: 'ILLEGAL_SPREAD',
+    errors = {-1: 'ILLEGAL_SPREAD', # TODO: eliminate unnecessary errno values
         -2: 'COULD_NOT_CONNECT',
         -3: 'REJECT_QUOTA',
         -4: 'REJECT_NO_NAME',

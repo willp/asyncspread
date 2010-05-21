@@ -135,13 +135,17 @@ class MembershipMessage(SpreadMessage):
     def __repr__(self):
         return '%s:  group:%s,  members:%s' % (self.__class__, self.group, self.members)
 
-class TransitionalMessage(MembershipMessage): pass
+class TransitionalMessage(MembershipMessage):
+    pass
 
-class JoinMessage(MembershipMessage): pass
+class JoinMessage(MembershipMessage):
+    pass
 
-class DisconnectMessage(MembershipMessage): pass
+class DisconnectMessage(MembershipMessage):
+    pass
 
-class NetworkMessage(MembershipMessage): pass
+class NetworkMessage(MembershipMessage):
+    pass
 
 class LeaveMessage(MembershipMessage):
     def __init__(self, group, self_leave=False):

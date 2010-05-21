@@ -642,7 +642,7 @@ class AsyncSpread(asynchat.async_chat):
     def handle_error(self):
         (exc_type, exc_val, tb) = sys.exc_info()
         self.logger.warning('handle_error(): Got exception: %s' % exc_val)
-        self.logger.info('Traceback: ' + traceback.format_exc(file=sys.stdout))
+        self.logger.info('Traceback: ' + traceback.format_exc())
         self._drop()
         sys.exc_clear()
         self.listener._process_error(self, exc_val)

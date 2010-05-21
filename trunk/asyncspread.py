@@ -662,6 +662,7 @@ class AsyncSpread(asynchat.async_chat):
     # is this only done in threaded apps? i think so...
     def do_io(self, forever=False, timer_interval=1):
         self.io_active = True
+        print 'Doing io in do_io()'
         main_loop = 0
         if self.dead:
             # wait
@@ -683,7 +684,7 @@ class AsyncSpread(asynchat.async_chat):
                 self.start_connect()
             # make sure not to deliver any messages if the session isn't ready
             if not self.io_ready.isSet():
-                print 'IO not ready!'
+                time.sleep(0.1)#print 'IO not ready!'
                 continue
             # deliver queued up outbound data
             while len(self.out_queue) > 0 and not self.dead and self.private_name is not None:

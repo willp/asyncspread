@@ -51,6 +51,7 @@ listener2.set_group_cb('gr1', asyncspread.GroupCallback(cb_data=data_cb,
 myname = '\'%03d' % (int(time.time()*10) % 1000)
 myname = 'rb01'
 #print 'My name is: "%s"' % myname
+print 'Connecting to %s' % (sys.argv[1])
 sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener2)
 sp.set_level(asyncspread.ServiceTypes.UNRELIABLE_MESS)
 ret = sp.start_connect()
@@ -63,9 +64,9 @@ for g in ('gr1', 'group2', 'gr2', 'gr5'):
     sp.join(g)
 
 #sp.loop(1)
-for i in xrange(1, 160000):
-    #if sp.dead:
-    #    break
+for i in xrange(1, 16):
+    if sp.dead:
+        break
     groups = ['gr1']
     if i % 5 == 0:
         groups.append('gr3')
@@ -90,7 +91,7 @@ for i in xrange(1, 160000):
     time.sleep(1)
     print
 print 'Entering big long lasting loop...'
-time.sleep(120)
+time.sleep(20)
 #sp.loop(60000)
 print 'Done with big loop..'
 sp.leave('gr18')

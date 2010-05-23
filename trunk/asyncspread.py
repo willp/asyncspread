@@ -109,7 +109,6 @@ class SpreadProto(object):
 class SpreadMessage(object):
     def _set_data(self, data):
         self.data = data
-        return self
 
 class DataMessage(SpreadMessage):
     def __init__(self, sender, mesg_type, self_discarded):
@@ -122,11 +121,27 @@ class DataMessage(SpreadMessage):
 
     def _set_grps(self, groups):
         self.groups = groups
-        return self
 
     def __repr__(self):
         return '%s:  sender:%s,  mesg_type:%d,  groups:%s,  self-disc:%s,  data:"%s"' % (self.__class__,
                             self.sender, self.mesg_type, self.groups, self.self_discarded, self.data)
+
+class OpaqueMessage(SpreadMessage):
+    def __init__(self, sender, svc_type, mesg_type, is_membership):
+        SpreadMessage.__init__(self)
+        self.sender = sender
+        self.svc_type = svc_type
+        self.mesg_type = mesg_type
+        self.is_membership = is_membership
+        self.groups = []
+        self.data = ''
+    
+    def _set_grps(self, groups):
+        self.groups = groups
+        
+    def __repr__(self):
+        return '%s:  svc_type: 0x%04x  mesg_type:%d  sender:%s  groups:%s  data(%d bytes):"%s"' % (self.svc_type,
+                    self.mesg_type, self.__class__, self.sender, self.groups, len(self.data), self.data)
 
 class MembershipMessage(SpreadMessage):
     def __init__(self, group):
@@ -136,7 +151,6 @@ class MembershipMessage(SpreadMessage):
 
     def _set_grps(self, groups):
         self.members = groups
-        return self
 
     def __repr__(self):
         return '%s:  group:%s,  members:%s' % (self.__class__, self.group, self.members)
@@ -217,8 +231,8 @@ class SpreadMessageFactory(object):
                 return self.this_mesg
             # fall-thru error here, unknown change-cause!
             print 'ERROR: unknown membership change CAUSE.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
-            self._reset()
-            return None
+            self.this_mesg = OpaqueMessage(sender, svc_type, mesg_type, is_membership=True)
+            return self.this_mesg
         elif svc_type & ServiceTypes.CAUSED_BY_LEAVE:
             # self-LEAVE message!
             self.this_mesg = LeaveMessage(sender, True)
@@ -230,8 +244,9 @@ class SpreadMessageFactory(object):
             return self.this_mesg
         # fall-thru error here, unknown type
         print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
-        self._reset()
-        return None
+        self.this_mesg = OpaqueMessage(sender, svc_type, mesg_type, is_membership=False)
+        return self.this_mesg
+        #return None
 
 
 class SpreadListener(object):
@@ -779,8 +794,17 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
             # Listeners should not throw exceptions here
             if isinstance(message, MembershipMessage):
                 listener._process_membership(self, message)
-            else:
+            elif isinstance(message, DataMessage):
                 listener._process_data(self, message)
+            elif isinstance(message, OpaqueMessage):
+                # opaque messages go here
+                print 'Unknown message received as OpaqueMessage:', message
+                print 'NO handling known/possible...'
+                print 'Ignoring unparsed opaque message'
+                # let's hope this never happens
+            else:
+                pass
+                # this never happens. asset() here
 
     def collect_incoming_data(self, data):
         '''Buffer the data'''

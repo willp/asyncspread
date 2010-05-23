@@ -546,22 +546,22 @@ class DebugListener(SpreadListener):
         except:
             print 'DEBUG: Parent class threw an exception in handle_timer()' # TODO: print traceback here
 
-# --- helper to fix for python2.4 asynchat missing a 'map' parameter
-class async_chat2(asynchat.async_chat):
-        def __init__ (self, conn=None, map=None):
-            # if python version < 2.6:
-            if sys.version_info[0:2] < (2,6):
-                # python 2.4 and 2.5 need to do this:
-                self.ac_in_buffer = ''
-                self.ac_out_buffer = ''
-                self.producer_fifo = asynchat.fifo()
-                # and here is the fix, I'm including 'map' to the superclass constructor here:
-                asyncore.dispatcher.__init__ (self, conn, map)
-            else:
-                # otherwise, we defer 100% to the parent class, since it works fine
-                asynchat.async_chat.__init__(self, conn, map)
+class async_chat26(asynchat.async_chat):
+    '''helper to fix for python2.4 asynchat missing a 'map' parameter'''
+    def __init__ (self, conn=None, map=None):
+        # if python version < 2.6:
+        if sys.version_info[0:2] < (2,6):
+            # python 2.4 and 2.5 need to do this:
+            self.ac_in_buffer = ''
+            self.ac_out_buffer = ''
+            self.producer_fifo = asynchat.fifo()
+            # and here is the fix, I'm including 'map' to the superclass constructor here:
+            asyncore.dispatcher.__init__ (self, conn, map)
+        else:
+            # otherwise, we defer 100% to the parent class, since it works fine
+            asynchat.async_chat.__init__(self, conn, map)
 
-class AsyncSpread(async_chat2): # was asynchat.async_chat
+class AsyncSpread(async_chat26): # was asynchat.async_chat
     '''Asynchronous client API for Spread 4.x group messaging.'''
     def __init__(self, name, host, port,
                  listener=None,
@@ -581,10 +581,9 @@ class AsyncSpread(async_chat2): # was asynchat.async_chat
         @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True.
         @type priority_high: bool
         '''
-        self.my_map = dict()
-        #asynchat.async_chat.__init__(self)
-        async_chat2.__init__(self, map=self.my_map)
-        self.name, self.host, self.port = name, host, port
+        self.my_map = dict() # TODO: consider a class variable here instead?
+        async_chat26.__init__(self, map=self.my_map)
+        self.name, self.host, self.port = (name, host, port)
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
         self.listener = listener # a SpreadListener

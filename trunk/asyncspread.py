@@ -1,18 +1,19 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback
 from collections import deque
 
-# This code is released for use under the Gnu Public License V3 (GPLv3).
-#
-# Thanks to Qingfeng for the initial version of code that inspired this rewrite.
-#
-# Thanks to Spread Concepts, LLC., especially Amir Yair and Jonathan Stanton for
-# the Spread toolkit.
-#
-# Please accept my humble apologies for this code being somewhat disorganized.
-# It is a work in progress!
-#
-# Author:  "J. Will Pierce" <willp@nuclei.com>
+'''This code is released for use under the Gnu Public License V3 (GPLv3).
+
+Thanks to Qingfeng for the initial version of code that inspired this rewrite.
+
+Thanks to Spread Concepts, LLC., especially Amir Yair and Jonathan Stanton for
+the Spread toolkit.
+
+Please accept my humble apologies for this code being somewhat disorganized.
+It is a work in progress!
+
+Author:  "J. Will Pierce" <willp@nuclei.com>
+'''
 
 class NullLogHandler(logging.Handler):
     '''Log null handler for polite logging'''
@@ -117,7 +118,7 @@ class DataMessage(SpreadMessage):
         self.mesg_type = mesg_type
         self.self_discarded = self_discarded
         self.groups = []
-        self.data = '' # was: None
+        self.data = ''
 
     def _set_grps(self, groups):
         self.groups = groups
@@ -214,25 +215,30 @@ class SpreadMessageFactory(object):
             if svc_type & ServiceTypes.CAUSED_BY_NETWORK:
                 self.this_mesg = NetworkMessage(sender)
                 return self.this_mesg
-            # fall-thru error here, unknown cause!
+            # fall-thru error here, unknown change-cause!
             print 'ERROR: unknown membership change CAUSE.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
+            self._reset()
+            return None
         elif svc_type & ServiceTypes.CAUSED_BY_LEAVE:
             # self-LEAVE message!
             self.this_mesg = LeaveMessage(sender, True)
             return self.this_mesg
-        # strange, sometimes this is received NOT as a regular membership message
+        # strange, sometimes this is received NOT as a regular membership message?
         if svc_type & ServiceTypes.TRANSITION_MESS:
             # TRANSITIONAL message, a type of membership message
             self.this_mesg = TransitionalMessage(sender)
             return self.this_mesg
         # fall-thru error here, unknown type
         print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
-        self.this_mesg = None
+        self._reset()
         return None
 
 
 class SpreadListener(object):
     def __init__(self):
+        self._clear_groups()
+
+    def _clear_groups(self):
         self.groups = dict()
 
     def _process_membership(self, conn, message):
@@ -289,9 +295,9 @@ class SpreadListener(object):
     # these are here to make it easier for subclasses to override handle_* and permit
     # future enhancements to the base class, similar to how _process_membership() does
     # bookkeeping, before calling handle_*() methods
+    # TODO: wrap the handle_() methods with try/except?
 
     def _process_data(self, conn, message):
-        # not sure if this method is really needed...
         self.handle_data(conn, message)
 
     def _process_connected(self, conn):
@@ -302,6 +308,8 @@ class SpreadListener(object):
 
     def _process_dropped(self, conn):
         self.handle_dropped(conn)
+        # AFTER doing handle_dropped(), clear out the group membership
+        self._clear_groups()
 
     def handle_connected(self, conn):
         pass

@@ -117,7 +117,7 @@ class DataMessage(SpreadMessage):
         self.mesg_type = mesg_type
         self.self_discarded = self_discarded
         self.groups = []
-        self.data = None # TODO: empty string may be a better choice here!
+        self.data = '' # was: None
 
     def _set_grps(self, groups):
         self.groups = groups
@@ -362,7 +362,7 @@ class SpreadPingListener(SpreadListener):
         if (message.mesg_type == self.ping_mtype and
             len(message.groups) == 1 and
             message.sender == conn.private_name and
-            data is not None): # change to empty string for default empty data?
+            len(data) > 0):
             (head, ping_id, timestamp) = data.split(':')
             ping_id = int(ping_id)
             elapsed = time.time() - float(timestamp)
@@ -480,6 +480,7 @@ class CallbackListener(SpreadListener):
                     cb_ref(*args)
                 except:
                     print 'Exception in client callback' # TODO: add traceback output here
+                    # also TODO: perhaps invoke an error handler callback? or use logging?
 
     def handle_data(self, conn, message):
         if self.cb_data:
@@ -508,7 +509,7 @@ class DebugListener(SpreadListener):
     '''super verbose'''
 
     def handle_connected(self, conn):
-        print 'DEBUG: Got connected, authenticated and new session is ready!'
+        print 'DEBUG: Got connected, new session is ready!'
 
     def handle_dropped(self, conn):
         print 'DEBUG: Lost connection!'
@@ -543,10 +544,24 @@ class DebugListener(SpreadListener):
         try:
             super(DebugListener, self).handle_timer(conn)
         except:
-            pass
             print 'DEBUG: Parent class threw an exception in handle_timer()' # TODO: print traceback here
 
-class AsyncSpread(asynchat.async_chat):
+# --- helper to fix for python2.4 asynchat missing a 'map' parameter
+class async_chat2(asynchat.async_chat):
+        def __init__ (self, conn=None, map=None):
+            # if python version < 2.6:
+            if sys.version_info[0:2] < (2,6):
+                # python 2.4 and 2.5 need to do this:
+                self.ac_in_buffer = ''
+                self.ac_out_buffer = ''
+                self.producer_fifo = asynchat.fifo()
+                # and here is the fix, I'm including 'map' to the superclass constructor here:
+                asyncore.dispatcher.__init__ (self, conn, map)
+            else:
+                # otherwise, we defer 100% to the parent class, since it works fine
+                asynchat.async_chat.__init__(self, conn, map)
+
+class AsyncSpread(async_chat2): # was asynchat.async_chat
     '''Asynchronous client API for Spread 4.x group messaging.'''
     def __init__(self, name, host, port,
                  listener=None,
@@ -566,7 +581,9 @@ class AsyncSpread(asynchat.async_chat):
         @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True.
         @type priority_high: bool
         '''
-        asynchat.async_chat.__init__(self)
+        self.my_map = dict()
+        #asynchat.async_chat.__init__(self)
+        async_chat2.__init__(self, map=self.my_map)
         self.name, self.host, self.port = name, host, port
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
@@ -675,7 +692,7 @@ class AsyncSpread(asynchat.async_chat):
             main_loop += 1
             # spend some time in asyncore event loop
             if not self.dead:
-                asyncore.loop(timeout=0.01, count=50, use_poll=True)
+                asyncore.loop(timeout=0.01, count=50, use_poll=True, map=self.my_map)
             # then do some timer tasks
             if time.time() >= timer_next:
                 self.listener._process_timer(self)
@@ -711,7 +728,7 @@ class AsyncSpread(asynchat.async_chat):
         #self.listener._process_timer(self) #hmm, to do or not to do...
         while not self.dead and (count is None or main_loop < count):
             main_loop += 1
-            asyncore.loop(timeout=timeout/5, count=5, use_poll=True)
+            asyncore.loop(timeout=timeout/5, count=5, use_poll=True, map=self.my_map)
             if self.private_name is not None and len(self.queue_joins) > 0:
                 self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
                 q_groups = self.queue_joins
@@ -724,7 +741,7 @@ class AsyncSpread(asynchat.async_chat):
     def poll(self, timeout=0.001):
         if self.dead:
             return False
-        asyncore.loop(timeout=timeout, count=1)
+        asyncore.loop(timeout=timeout, count=1, map=self.my_map)
         return True
 
     def wait_for_connection(self, timeout=10, sleep_delay=0.1):
@@ -1031,6 +1048,7 @@ class SpreadAuthException(SpreadException):
     def __init__(self, errno):
         SpreadException.__init__(self, errno)
         self.type = 'SpreadAuthException' # TODO: clean up
+
 
 
 

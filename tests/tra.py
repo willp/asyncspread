@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2.6
 import time, sys, logging
 sys.path.append('.')
 import asyncspread
@@ -39,4 +39,7 @@ while sp.connected:
     sp.multicast(['gr2', 'AZ'], 'my multicast num %d' % (loop), 0, self_discard=False)
     sp.multicast([], 'To No groups: my multicast num %d' % (loop), 0, self_discard=False)
     listener.ping(sp, ping_response)
-    sp.loop(100)
+    sp.loop(50)
+    if loop > 500:
+        sp.disconnect()
+        sp.loop(100)

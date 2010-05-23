@@ -100,6 +100,11 @@ class SpreadProto(object):
         #print 'connect_fmt:', connect_fmt, 'args', (4, 1, 0, mem_opts, name_len, my_name)
         return struct.pack(connect_fmt, SpreadProto.VERSION_MAJOR, SpreadProto.VERSION_MINOR, SpreadProto.VERSION_PATCH, mem_opts, name_len, my_name)
 
+    def get_send_pkt(self, self_discard):
+        if self_discard:
+            return self.send_pkt_selfdisc
+        return self.send_pkt
+
 class SpreadMessage(object):
     def _set_data(self, data):
         self.data = data
@@ -292,9 +297,6 @@ class SpreadListener(object):
     def _process_connected(self, conn):
         self.handle_connected(conn)
 
-    def _process_authenticated(self, conn):
-        self.handle_authenticated(conn)
-
     def _process_error(self, conn, exc):
         self.handle_error(conn, exc)
 
@@ -302,9 +304,6 @@ class SpreadListener(object):
         self.handle_dropped(conn)
 
     def handle_connected(self, conn):
-        pass
-
-    def handle_authenticated(self, conn):
         pass
 
     def handle_error(self, conn, exc):
@@ -432,16 +431,16 @@ class CallbackListener(SpreadListener):
 
     There is some risk of this code being very boilerplate.  Oh well.  It's helper code.
     '''
-    def __init__(self, cb_auth=None, cb_data=None, cb_dropped=None, cb_error=None):
+    def __init__(self, cb_conn=None, cb_data=None, cb_dropped=None, cb_error=None):
         '''Creates a new callback listener.
 
-        @param auth: callback to be invoked as auth(listener, conn) when the session passes authenticated and the session is 'connected'
-        @param data: callback to be invoked as data(listener, conn, message) when any data message arrives on any group
-        @param dropped: callback to be invoked as dropped(listener, conn) when the connection is dropped
-        @param error: callback to be invoked as error(listener, conn, exception) when an error happens
+        @param cb_conn: callback to be invoked as cb_conn(listener, conn) when the session is authenticated and so is officially connected
+        @param cb_data: callback to be invoked as cb_data(listener, conn, message) when any data message arrives on any group
+        @param cb_dropped: callback to be invoked as cb_dropped(listener, conn) when the connection is dropped
+        @param cb_error: callback to be invoked as cb_error(listener, conn, exception) when an error happens
         '''
         SpreadListener.__init__(self)
-        self.cb_auth = cb_auth
+        self.cb_conn = cb_conn
         self.cb_data = cb_data
         self.cb_dropped = cb_dropped
         self.cb_error = cb_error
@@ -459,9 +458,9 @@ class CallbackListener(SpreadListener):
         '''
         self.cb_groups[group] = group_callback
 
-    def handle_authenticated(self, conn):
-        if self.cb_auth:
-            self.cb_auth(self, conn)
+    def handle_connected(self, conn):
+        if self.cb_conn:
+            self.cb_conn(self, conn)
 
     def handle_dropped(self, conn):
         if self.cb_dropped:
@@ -509,13 +508,10 @@ class DebugListener(SpreadListener):
     '''super verbose'''
 
     def handle_connected(self, conn):
-        print 'DEBUG: Got connected!'
+        print 'DEBUG: Got connected, authenticated and new session is ready!'
 
     def handle_dropped(self, conn):
         print 'DEBUG: Lost connection!'
-
-    def handle_authenticated(self, conn):
-        print 'DEBUG: Got authenticated, new session is ready!'
 
     def handle_error(self, conn, exc):
         print 'DEBUG: Got error! Exception:', type(exc), exc
@@ -576,29 +572,26 @@ class AsyncSpread(asynchat.async_chat):
         self.priority_high = priority_high
         self.listener = listener # a SpreadListener
         self.keepalive = keepalive
-        self.keepalive_idle = 10
+        self.keepalive_idle = 10 # every 10 seconds of idleness, send a keepalive (empty PSH/ACK)
         self.keepalive_maxdrop = 6 # one minute
         # initialize some basics
+        self.unpack_header = self.make_unpack_header()
         self.logger = logging.getLogger()
         self.proto = SpreadProto()
-        self.private_name = None
         self._clear_ibuffer()
+        #
+        self.private_name = None
+        self.session_up = False
         self.msg_count = 0
         # more settings
         self.queue_joins = []
         self.dead = False
         self.need_bytes = 0
         self.mfactory = None
-        self.io_active = False
-        self.io_ready = threading.Event()
+        self.io_active = False # TODO: thread only
+        self.io_ready = threading.Event() # TODO: thread only
         self.do_reconnect = False
         self.out_queue = deque() # outbound messages for threaded uses
-        # optimization for python 2.5+
-        try:
-            _struct_hdr = struct.Struct(SpreadProto.HEADER_FMT) # precompiled
-            self.struct_hdr = _struct_hdr.unpack # bound method
-        except: # python <= 2.4 support
-            self.struct_hdr = self._unpack_header
 
     def _do_connect(self):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -628,12 +621,22 @@ class AsyncSpread(asynchat.async_chat):
         more optimized struct.Struct class for holding pre-compiled struct formats.'''
         return struct.unpack(SpreadProto.HEADER_FMT, payload)
 
+    def make_unpack_header(self):
+        try:
+            precompiled = struct.Struct(SpreadProto.HEADER_FMT)
+            return precompiled.unpack # bound method
+        except: # python <= 2.4 support
+            return self._unpack_header
+
+    def _clear_ibuffer(self):
+        self.ibuffer = ''
+        self.ibuffer_start = 0
+
     def handle_connect(self):
-        self.logger.debug('handle_connect(): my name is: %s' % (self.name))
+        self.logger.debug('handle_connect(): got TCP connection to server, sending credentials')
         msg_connect = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
         self.wait_bytes(1, self.st_auth_read)
         self.push(msg_connect)
-        self.listener._process_connected(self) # dubious utility here
 
     def handle_close(self):
         self.logger.warning('Connection lost to server: %s:%d' % (self.host, self.port))
@@ -735,15 +738,13 @@ class AsyncSpread(asynchat.async_chat):
             time.sleep(sleep_delay)
         return self.private_name is not None
 
-    def _clear_ibuffer(self):
-        self.ibuffer = ''
-        self.ibuffer_start = 0
-
     def _drop(self):
         self.dead = True
+        self.session_up = False
         self.io_ready.clear()
-        self.connected = False
-        self.close()
+        print 'in _drop 0: self.connected:', self.connected
+        self.close() # changes self.connected to False
+        print 'in _drop 1: self.connected:', self.connected
         self.discard_buffers()
         self._clear_ibuffer()
         self.private_name = None
@@ -834,15 +835,16 @@ class AsyncSpread(asynchat.async_chat):
     def st_set_private(self, data):
         self.logger.debug('STATE: st_set_private')
         self.private_name = data
+        self.session_up = True
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
         self.logger.info('My private name for this connection is: "%s"' % (self.private_name))
-        self.listener._process_authenticated(self)
+        self.listener._process_connected(self)
         self.wait_bytes(48, self.st_read_header)
         self.io_ready.set()
 
     def st_read_header(self, data):
         self.logger.debug('STATE: st_read_header')
-        (svc_type, sender, num_groups, mesg_type, mesg_len) = self.struct_hdr(data)
+        (svc_type, sender, num_groups, mesg_type, mesg_len) = self.unpack_header(data)
         # TODO: add code to flip endianness of svc_type and mesg_type if necessary (independently?)
         ENDIAN_TEST = 0x80000080
         endian_wrong = (svc_type & ENDIAN_TEST) == 0
@@ -867,9 +869,8 @@ class AsyncSpread(asynchat.async_chat):
         # At this point, we have a full message in factory_mesg, even though it has no groups or body
         # Is this ever reached?
         self.logger.warning('Strange: message contains no body, and has no groups in header.  This should be exceedingly rare, if not impossible.')
-        self._dispatch(factory_mesg)
         self.wait_bytes(48, self.st_read_header)
-        return
+        self._dispatch(factory_mesg)
 
     def st_read_groups(self, data):
         self.logger.debug('STATE: st_read_groups')
@@ -882,15 +883,14 @@ class AsyncSpread(asynchat.async_chat):
             self.wait_bytes(mesg_len, self.st_read_message)
             return
         # handle case of no message body, on self-leave
-        self._dispatch(factory_mesg)
         self.wait_bytes(48, self.st_read_header)
-        return
+        self._dispatch(factory_mesg)
 
     def st_read_message(self, data):
         self.logger.debug('STATE: st_read_message')
         self.msg_count += 1
-        self.wait_bytes(48, self.st_read_header) # always going to a new message next
         factory_mesg = self.mfactory.process_data(data)
+        self.wait_bytes(48, self.st_read_header) # always going to a new message next
         self._dispatch(factory_mesg)
 
     def _send(self, data):
@@ -944,10 +944,7 @@ class AsyncSpread(asynchat.async_chat):
             return False # TODO: Consider raising exception?
         #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
         data_len = len(message)
-        if self_discard:
-            svc_type_pkt = self.proto.send_pkt_selfdisc # was: SpreadProto.SEND_SELFDISCARD_PKT
-        else:
-            svc_type_pkt = self.proto.send_pkt # was: SpreadProto.SEND_PKT
+        svc_type_pkt = self.proto.get_send_pkt(self_discard)
         header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.private_name, groups, data_len)
         pkt = header + message
         self._send(pkt)
@@ -958,9 +955,43 @@ class AsyncSpread(asynchat.async_chat):
         return self.multicast([group], message, mesg_type, self_discard=False)
 
 class AsyncSpreadThreaded(AsyncSpread):
-    '''Threaded (technically thread-safe) subclass of AsyncSpread.
+    '''Thread-safe subclass of AsyncSpread which will implement a background IO thread, or allow
+    you to implement your own IO thread (since asyncore/asynchat is not thread-safe itself.
+    
+    Typical implementation will be:
+    - user threads invoke various methods to initiate a connect, join, leave, multicast, unicast, disconnect, etc
+    - blocking methods (like connect) will let user specify a timeout
+    - all other methods operate only on a queue that the IO thread will process
+    - ONLY the IO thread runs asyncore.loop()
+    -- therefore, ONLY the IO thread runs in the st_* methods for processing the protocol
+    - ALL user callbacks will be invoked by a separate thread (perhaps this happens in a run() method? so the
+    user's invoking thread is used as the response thread.  could keep things pretty stable.)
+    - IO thread is daemonic
+    - exceptions are only raised to the user thread
+    - IO thread runs all the time? or only when the connection is up?
+    
+    The main AsyncSpread class will turn into a class that you have to invoke .loop() against, to ask it to do asyncore.loop()
+    ... OR... do I want to be more complicated....
+    
+    Think about simple client case: I want to connect up to the mesg bus, and send one request to a channel and
+    gather up responses and then disconnect or exit.  The threaded method would be a bit overkill, so the nonthreaded
+    version would work nicely, as long as I have a way to wait for responses.  Maybe I have a wait() method that takes
+    as arguments the # of DataMessages to wait for, or a maximum timeout.  But.. since the handler_*() methods would
+    be invoked for the responses (or callbacklistener does stuff), then maybe I should just use a loop() method that
+    checks a flag and does a graceful disconnect and close() when the flag is set.  There could be a simple method
+    that would set this flag.  Hmm.  That seems most convenient to the user.  Each handle_data() call would decide whether
+    to throw the flag or not.    
     '''
-    pass
+
+    def _send(self, pkt):
+        self.out_queue.append(data)
+    def do_io(self): # TODO: rename?
+        pass
+    def start_io_thread(self, forever=True):
+        pass
+    def loop(self, count=None, timeout=0.1, timer_interval=10):
+        pass # override this but raise an exception?
+    
 
 class SpreadException(Exception):
     '''SpreadException class from pyspread code by Quinfeng.

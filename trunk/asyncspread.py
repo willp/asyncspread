@@ -110,6 +110,9 @@ class SpreadMessage(object):
     def _set_data(self, data):
         self.data = data
 
+    def _set_grps(self, groups):
+        self.groups = groups
+
 class DataMessage(SpreadMessage):
     def __init__(self, sender, mesg_type, self_discarded):
         SpreadMessage.__init__(self)
@@ -118,9 +121,6 @@ class DataMessage(SpreadMessage):
         self.self_discarded = self_discarded
         self.groups = []
         self.data = ''
-
-    def _set_grps(self, groups):
-        self.groups = groups
 
     def __repr__(self):
         return '%s:  sender:%s,  mesg_type:%d,  groups:%s,  self-disc:%s,  data:"%s"' % (self.__class__,
@@ -135,10 +135,7 @@ class OpaqueMessage(SpreadMessage):
         self.is_membership = is_membership
         self.groups = []
         self.data = ''
-    
-    def _set_grps(self, groups):
-        self.groups = groups
-        
+
     def __repr__(self):
         return '%s:  svc_type: 0x%04x  mesg_type:%d  sender:%s  groups:%s  data(%d bytes):"%s"' % (self.svc_type,
                     self.mesg_type, self.__class__, self.sender, self.groups, len(self.data), self.data)
@@ -243,7 +240,7 @@ class SpreadMessageFactory(object):
             self.this_mesg = TransitionalMessage(sender)
             return self.this_mesg
         # fall-thru error here, unknown type
-        print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
+        #print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
         self.this_mesg = OpaqueMessage(sender, svc_type, mesg_type, is_membership=False)
         return self.this_mesg
         #return None
@@ -590,7 +587,8 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
                  listener=None,
                  membership_notifications=True,
                  priority_high=False,
-                 keepalive=True):
+                 keepalive=True,
+                 map=None):
         '''Create object representing asynchronous connection to a spread daemon.
 
         @param name: your unique self-identifier, no more than 10 characters long, unique to this server
@@ -604,7 +602,10 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True.
         @type priority_high: bool
         '''
-        self.my_map = dict() # TODO: consider a class variable here instead?
+        if map is None:
+            self.my_map = dict() # TODO: consider a class variable here instead?
+        else:
+            self.my_map = map
         async_chat26.__init__(self, map=self.my_map)
         self.name, self.host, self.port = (name, host, port)
         self.membership_notifications = membership_notifications
@@ -631,6 +632,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.io_ready = threading.Event() # TODO: thread only
         self.do_reconnect = False
         self.out_queue = deque() # outbound messages for threaded uses
+
+    def __str__(self):
+        return '<%s>: name="%s", connected=%s, server="%s:%d", private_name="%s"' % (self.__class__, self.name, self.connected, self.host, self.port, self.private_name)
 
     def _do_connect(self):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -781,9 +785,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.dead = True
         self.session_up = False
         self.io_ready.clear()
-        print 'in _drop 0: self.connected:', self.connected
         self.close() # changes self.connected to False
-        print 'in _drop 1: self.connected:', self.connected
         self.discard_buffers()
         self._clear_ibuffer()
         self.private_name = None
@@ -1032,7 +1034,7 @@ class AsyncSpreadThreaded(AsyncSpread):
     '''
 
     def _send(self, pkt):
-        self.out_queue.append(data)
+        self.out_queue.append(pkt)
     def do_io(self): # TODO: rename?
         pass
     def start_io_thread(self, forever=True):
@@ -1048,7 +1050,7 @@ class SpreadException(Exception):
     errors = {-1: 'ILLEGAL_SPREAD', # TODO: eliminate unnecessary errno values
         -2: 'COULD_NOT_CONNECT',
         -3: 'REJECT_QUOTA',
-        -4: 'REJECT_NO_NAME',
+        -4: 'REJECT_NO_NAME', # doesn't happen: if you send empty string, server assigns your name
         -5: 'REJECT_ILLEGAL_NAME', # name too long, or bad chars
         -6: 'REJECT_NOT_UNIQUE', # name collides with another client!
         -7: 'REJECT_VERSION', # server thinks client is too old

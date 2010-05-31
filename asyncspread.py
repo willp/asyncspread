@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback
+import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback, itertools
 from collections import deque
 
 '''This code is released for use under the Gnu Public License V3 (GPLv3).
@@ -524,6 +524,22 @@ class CallbackListener(SpreadListener):
     def handle_network_split(self, conn, group, changes, old_membership, new_membership):
         self._invoke_cb(group, 'cb_network', (group, changes, old_membership, new_membership))
 
+    def join_with_wait(self, conn, group, timeout=10):
+        '''Join group, and return when the join was successfully joined, or if the timeout expired'''
+        expire_time = time.time() + timeout
+        joined = False
+        members = []
+        def done(conn, group, membership):
+            joined = True
+            members = membership
+            print 'GCB invoked! Group "%s" joined! Members: %s' % (group, members)
+        self.set_group_cb(group, GroupCallback(cb_start=done))
+        conn.join(group)
+        while time.time() < expire_time and not joined:
+            conn.loop(1)
+            print 'waiting for join to group "%s"' % (group)
+            time.sleep(0.1)
+        return joined
 
 class DebugListener(SpreadListener):
     '''super verbose'''
@@ -602,15 +618,17 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True.
         @type priority_high: bool
         '''
-        if map is None:
-            self.my_map = dict() # TODO: consider a class variable here instead?
-        else:
+        if map is not None:
             self.my_map = map
+        else:
+            self.my_map = dict()
         async_chat26.__init__(self, map=self.my_map)
         self.name, self.host, self.port = (name, host, port)
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
-        self.listener = listener # a SpreadListener
+        # the SpreadListener object to invoke for message and connection events
+        self.listener = listener
+        # TCP keepalive settings
         self.keepalive = keepalive
         self.keepalive_idle = 10 # every 10 seconds of idleness, send a keepalive (empty PSH/ACK)
         self.keepalive_maxdrop = 6 # one minute
@@ -618,6 +636,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.unpack_header = self.make_unpack_header()
         self.logger = logging.getLogger()
         self.proto = SpreadProto()
+        self.mfactory = None
         self._clear_ibuffer()
         #
         self.private_name = None
@@ -626,12 +645,15 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         # more settings
         self.queue_joins = []
         self.dead = False
+        # state machine for protocol processing uses these
         self.need_bytes = 0
-        self.mfactory = None
+        self.next_state = None
+        # thread/io data
         self.io_active = False # TODO: thread only
-        self.io_ready = threading.Event() # TODO: thread only
         self.do_reconnect = False
-        self.out_queue = deque() # outbound messages for threaded uses
+        self.shutdown = False
+        # outbound messages for threaded uses
+        self.out_queue = deque()
 
     def __str__(self):
         return '<%s>: name="%s", connected=%s, server="%s:%d", private_name="%s"' % (self.__class__, self.name, self.connected, self.host, self.port, self.private_name)
@@ -697,53 +719,6 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         sys.exc_clear()
         self.listener._process_error(self, exc_val)
         self.listener._process_dropped(self)
-
-    def start_io_thread(self, forever=True):
-        if self.io_active: # not thread safe, not really. race condition here.
-            return
-        thr = threading.Thread(target=self.do_io, args=(forever,), name='AsyncSpread I/O Thread')
-        thr.daemon=True
-        thr.start()
-
-    # is this only done in threaded apps? i think so...
-    def do_io(self, forever=False, timer_interval=1):
-        self.io_active = True
-        print 'Doing io in do_io()'
-        main_loop = 0
-        if self.dead:
-            # wait
-            print 'self.DEAD in IO thread...'
-        timer_next = time.time() + timer_interval
-        while not self.dead or forever:
-            main_loop += 1
-            # spend some time in asyncore event loop
-            if not self.dead:
-                asyncore.loop(timeout=0.01, count=50, use_poll=True, map=self.my_map)
-            # then do some timer tasks
-            if time.time() >= timer_next:
-                self.listener._process_timer(self)
-                timer_next = time.time() + timer_interval
-            # then do a reconnect if requested
-            if self.dead and self.do_reconnect:
-                self.do_reconnect = False # reset flag
-                print 'IO thread trying to start_connect()...'
-                self.start_connect()
-            # make sure not to deliver any messages if the session isn't ready
-            if not self.io_ready.isSet():
-                time.sleep(0.1)#print 'IO not ready!'
-                continue
-            # deliver queued up outbound data
-            while len(self.out_queue) > 0 and not self.dead and self.private_name is not None:
-                print 'QUEUE-LENGTH:', len(self.out_queue)
-                print '(IO SEND) writing to socket...'
-                self.push(self.out_queue.popleft())
-            # perform queued joins
-            if not self.dead and (self.private_name is not None and len(self.queue_joins) > 0):
-                self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
-                while len(self.queue_joins) > 0:
-                    self.join(self.queue_joins.pop())
-        print 'IO Thread exiting'
-        self.io_active = False
 
     def loop(self, count=None, timeout=0.1, timer_interval=10):
         '''factor out expire_every into a generalized timer that calls up into listener'''
@@ -890,7 +865,6 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.logger.info('My private name for this connection is: "%s"' % (self.private_name))
         self.listener._process_connected(self)
         self.wait_bytes(48, self.st_read_header)
-        self.io_ready.set()
 
     def st_read_header(self, data):
         self.logger.debug('STATE: st_read_header')
@@ -916,9 +890,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         if mesg_len > 0:
             self.wait_bytes(mesg_len, self.st_read_message)
             return
-        # At this point, we have a full message in factory_mesg, even though it has no groups or body
-        # Is this ever reached?
-        self.logger.warning('Strange: message contains no body, and has no groups in header.  This should be exceedingly rare, if not impossible.')
+        # AFAICT empty messages with no groups are self-leave messages, useful!
         self.wait_bytes(48, self.st_read_header)
         self._dispatch(factory_mesg)
 
@@ -944,6 +916,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self._dispatch(factory_mesg)
 
     def _send(self, data):
+        # TODO: override in subclass for threaded use
         if self.io_active:
             self.out_queue.append(data)
         else:
@@ -1030,17 +1003,76 @@ class AsyncSpreadThreaded(AsyncSpread):
     be invoked for the responses (or callbacklistener does stuff), then maybe I should just use a loop() method that
     checks a flag and does a graceful disconnect and close() when the flag is set.  There could be a simple method
     that would set this flag.  Hmm.  That seems most convenient to the user.  Each handle_data() call would decide whether
-    to throw the flag or not.    
+    to throw the flag or not.
     '''
+    def __init__(self, *args, **kwargs):
+        kwargs['map'] = dict() # ensure all instances get their own distinct map object
+        AsyncSpread.__init__(self, *args, **kwargs)
+        print 'Threaded constructor done'
+        print 'Starting IO thread now.'
+        self.io_ready = threading.Event() # TODO: thread only
+        self.start_io_thread()
+        self.do_reconnect = True
 
     def _send(self, pkt):
         self.out_queue.append(pkt)
-    def do_io(self): # TODO: rename?
-        pass
-    def start_io_thread(self, forever=True):
-        pass
+
+    def start_io_thread(self): # TODO: eliminate forever boolean
+        if self.io_active: # not thread safe, not really. race condition here.
+            return
+        thr = threading.Thread(target=self.do_io, args=[], name='AsyncSpreadThreaded I/O Thread')
+        thr.daemon=True
+        thr.start()
+
+    # is this only done in threaded apps? i think so...
+    def do_io(self, timer_interval=1):
+        '''This is the main IO thread's main loop for threaded asyncspread usage...  It
+        looks for new data to send from the output queues and checks the socket for
+        new messages, and invokes response callbacks through the listener object.
+
+        If the connection is shut down, this thread will wait until reconnect is set to
+        True, and initiate a new connection.  I think.
+        '''
+        self.io_active = True
+        print 'Doing io in do_io()'
+        main_loop = 0
+        timer_next = time.time() + timer_interval
+        while not self.shutdown:
+            main_loop += 1
+            # timer tasks
+            if time.time() >= timer_next:
+                print 'Invoking timer...'
+                self.listener._process_timer(self)
+                timer_next = time.time() + timer_interval
+            if self.dead:
+                print 'self.DEAD in IO thread...'
+            # then do a reconnect if requested
+            if not self.dead:
+                asyncore.loop(timeout=0.01, count=50, use_poll=True, map=self.my_map)
+            if self.do_reconnect:
+                self.do_reconnect = False # reset flag
+                print 'IO thread trying to start_connect()...  reset do_reconnect to False'
+                self.start_connect()
+                continue
+            # make sure not to deliver any messages if the session isn't ready
+            if not self.session_up:
+                print 'IO not ready! (session_up = False) SLEEP ONE'
+                time.sleep(1)
+                continue
+            # deliver queued up outbound data
+            while len(self.out_queue) > 0 and not self.dead and self.private_name is not None:
+                print '(IO SEND) writing to socket. Queue length is:', len(self.out_queue)
+                self.push(self.out_queue.popleft())
+            # perform queued joins
+            if not self.dead and (self.private_name is not None and len(self.queue_joins) > 0):
+                self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
+                while len(self.queue_joins) > 0:
+                    self.join(self.queue_joins.pop())
+        print 'IO Thread exiting'
+        self.io_active = False
+
     def loop(self, count=None, timeout=0.1, timer_interval=10):
-        pass # override this but raise an exception?
+        time.sleep(timeout * count)  # just sleep in this case? or raise exception?
     
 
 class SpreadException(Exception):

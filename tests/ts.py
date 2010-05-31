@@ -11,7 +11,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.DEBUG)
+setup_logging(logging.INFO)
 
 class MyListener(asyncspread.SpreadPingListener):
     def handle_ping(self, success, elapsed):
@@ -23,7 +23,7 @@ class MyListener(asyncspread.SpreadPingListener):
 def ping_cb(success, elapsed):
     print '*** PONG:  Success:', success, ' Elapsed:', elapsed
 
-def auth_cb(listener, conn):
+def conn_cb(listener, conn):
     print 'Got authenticated.'
 def drop_cb(listener, conn):
     print 'Client > DROPPED < CB:  conn:', conn
@@ -42,61 +42,61 @@ def join_leave_cb(conn, group, member, cause):
 def split_cb(conn, group, changes, old_membership, new_membership):
     print 'Client Network Split CB: conn:', conn, 'group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
 
-listener = MyListener() # asyncspread.SpreadListener()
-listener2 = asyncspread.CallbackListener(cb_auth=auth_cb, cb_error=err_cb, cb_dropped=drop_cb)
+listener = MyListener()
+listener2 = asyncspread.CallbackListener(cb_conn=conn_cb, cb_error=err_cb, cb_dropped=drop_cb)
 listener2.set_group_cb('gr1', asyncspread.GroupCallback(cb_data=data_cb,
                                     cb_start=start_end_cb, cb_end=start_end_cb,
                                     cb_join=join_leave_cb, cb_leave=join_leave_cb,
                                     cb_network=split_cb))
-myname = '\'%03d' % (int(time.time()*10) % 1000)
-myname = 'rb01'
+myname = 'rb01-%03d' % (int(time.time()*10) % 1000)
+#myname = 'rb01'
 #print 'My name is: "%s"' % myname
 print 'Connecting to %s' % (sys.argv[1])
-sp = asyncspread.AsyncSpread(myname, sys.argv[1], 24999, listener=listener2)
-sp.set_level(asyncspread.ServiceTypes.UNRELIABLE_MESS)
-ret = sp.start_connect()
-
+sp1 = asyncspread.AsyncSpreadThreaded(myname, sys.argv[1], 24999, listener=listener2)
+sp1.set_level(asyncspread.ServiceTypes.UNRELIABLE_MESS)
+time.sleep(1)
+ret = sp1.connected
 print 'Connected?', ret
 if ret:
-    print 'my private name is:',sp.private_name
-    sp.start_io_thread(forever=True)
+    print 'my private name is:', sp1.private_name
+    sp1.start_io_thread()
 for g in ('gr1', 'group2', 'gr2', 'gr5'):
-    sp.join(g)
+    sp1.join(g)
 
-#sp.loop(1)
+#sp1.loop(1)
 for i in xrange(1, 16):
-    if sp.dead:
+    if sp1.dead:
         break
     groups = ['gr1']
     if i % 5 == 0:
         groups.append('gr3')
         groups.append('gr5')
     if i % 6 == 0:
-        sp.multicast(groups, '', ((i*101) % 65535), self_discard=False)
+        sp1.multicast(groups, '', ((i*101) % 65535), self_discard=False)
     else:
-        sp.multicast(groups, 'Test message number %d' % (i), ((i*100) % 0xffff), self_discard=False)
+        sp1.multicast(groups, 'Test message number %d' % (i), ((i*100) % 0xffff), self_discard=False)
 #    if i % 10 == 9:
-#        listener.ping(sp, ping_cb, 5)
+#        listener.ping(sp1, ping_cb, 5)
 #    print 'sent off my messages for iteration %d' % (i)
     if i % 10 == 5:
-        sp.leave('gr2')
-        sp.join('gr1')
-        sp.multicast(['gr1'], 'Just joined! i=%d, and self-discard set to False' % (i), 0xff00, self_discard=False)
+        sp1.leave('gr2')
+        sp1.join('gr1')
+        sp1.multicast(['gr1'], 'Just joined! i=%d, and self-discard set to False' % (i), 0xff00, self_discard=False)
     if i % 10 == 2:
-        sp.leave('gr1')
-        sp.join('gr2')
-        sp.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff, self_discard=False)
-    sp.multicast(['gr1'], "A" * 900, 0, self_discard=False) # send big message
-    #sp.loop(1)
+        sp1.leave('gr1')
+        sp1.join('gr2')
+        sp1.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff, self_discard=False)
+    sp1.multicast(['gr1'], "A" * 900, 0, self_discard=False) # send big message
+    #sp1.loop(1)
     time.sleep(1)
     print
 print 'Entering big long lasting loop...'
 time.sleep(20)
-#sp.loop(60000)
+#sp1.loop(60000)
 print 'Done with big loop..'
-sp.leave('gr18')
-sp.disconnect()
-#sp.loop(10)
+sp1.leave('gr18')
+sp1.disconnect()
+#sp1.loop(10)
 print 'about to exit...'
 time.sleep(2)
 sys.exit(0)

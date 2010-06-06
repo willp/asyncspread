@@ -48,8 +48,8 @@ while sp1.connected or sp2.connected:
     sp2.multicast(['gr2', 'AZ'], 'SECOND connection: multicast num %d' % (loop), 0, self_discard=False)
     listener.ping(sp1, ping_response)
     listener.ping(sp2, ping_response)
-    sp1.loop(50)
-    sp2.loop(50)
+    sp1.loop(1)
+#    sp2.loop(50)
     if loop > 500:
         sp1.disconnect()
         sp1.loop(100)

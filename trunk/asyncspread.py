@@ -18,7 +18,6 @@ Author:  "J. Will Pierce" <willp@nuclei.com>
 class NullLogHandler(logging.Handler):
     '''Log null handler for polite logging'''
     def emit(self, record): pass
-logging.getLogger().addHandler(NullLogHandler())
 
 class ServiceTypes(object):
     # Classes of service:
@@ -716,11 +715,6 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         while not self.dead and (timeout is None or main_loop <= timeout):
             main_loop += 1
             asyncore.loop(timeout=slice, count=1, use_poll=True, map=self.my_map)
-            if self.private_name is not None and len(self.queue_joins) > 0:
-                self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
-                q_groups = self.queue_joins
-                self.queue_joins = []
-                self.join(q_groups)
             # every N iterations, check for timed out pings
             if self._is_timer():
                 self.listener._process_timer(self)
@@ -946,12 +940,10 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.wait_bytes(48, self.st_read_header) # always going to a new message next
         self._dispatch(factory_mesg)
 
-    # only works after getting connected
     def join(self, group):
         if self.private_name is None:
-            self.logger.warn('No private channel name known yet from server... queueing up group join for: %s' % (group))
-            self.queue_joins.append(group) # TODO: Rethink this?
-            return False
+            self.logger.critical('Not connected to spread. Cannot join group "%s"' % (group))
+            raise SpreadException(100) # not connected
         send_head = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.private_name, [group], 0)
         self._send(send_head)
         return True
@@ -966,8 +958,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
 
     def disconnect(self):
         if self.private_name is None:
-            self.logger.critical('No private channel name known yet from server... Failed disconnect() message')
-            return False
+            return False # is we're not connected, just return False instead of raising an exception
         who = self.private_name
         send_head = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
         self._send(send_head)
@@ -988,8 +979,8 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         @type self_discard: bool
         '''
         if self.private_name is None:
-            self.logger.critical('No private channel name known yet from server... Failed multicast message')
-            return False # TODO: Consider raising exception?
+            self.logger.critical('Not connected to spread. Cannot send multicast message to group(s) "%s"' % (groups))
+            raise SpreadException(100)
         #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
         data_len = len(message)
         svc_type_pkt = self.proto.get_send_pkt(self_discard)
@@ -1135,7 +1126,8 @@ class SpreadException(Exception):
         -15: 'BUFFER_TOO_SHORT',
         -16: 'GROUPS_TOO_SHORT',
         -17: 'MESSAGE_TOO_LONG',
-        -18: 'NET_ERROR_ON_SESSION' }
+        -18: 'NET_ERROR_ON_SESSION',
+       100: 'Not connected to spread server.' }
 
     def __init__(self, errno):
         Exception.__init__(self)
@@ -1156,6 +1148,9 @@ class SpreadAuthException(SpreadException):
 
 
 
+
+
+logging.getLogger().addHandler(NullLogHandler())
 
 if __name__ == '__main__':
     # do some unit testing here... not easy to imagine without a server to talk to

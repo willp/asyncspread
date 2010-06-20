@@ -1027,6 +1027,8 @@ class AsyncSpreadThreaded(AsyncSpread):
         AsyncSpread.__init__(self, *args, **kwargs)
         print 'NonThreaded constructor done, Threaded stuff happening now'
         self.io_thread = threading.Event() # TODO: thread only
+        self.io_thread_lock = threading.Lock()
+        self.io_thread_active = False
         self.do_reconnect = True
         # outbound messages for threaded uses
         self.out_queue = deque()
@@ -1035,14 +1037,21 @@ class AsyncSpreadThreaded(AsyncSpread):
         self.out_queue.append(pkt)
 
     def start_io_thread(self):
-        '''This is not truly thread safe, not really. There is a big race condition here.'''
-        if self.io_thread.isSet():
-            return
-        name_str = 'AsyncSpreadThreaded I/O Thread: %s' % (self.name)
-        thr = threading.Thread(target=self.do_io, args=[name_str], name=name_str)
-        thr.daemon=True
-        thr.start()
-        self.io_thread.set()
+        '''This is not truly thread safe, not really. There is a big race condition here.
+        1. obtain lock on io_thread_lock (BLOCKING)
+        2. check self.io_thread_active
+        3. if False, start thread and set True
+        4. else release lock and return
+        '''
+        self.io_thread_lock.acquire() #blocks
+        if not self.io_thread_active:
+            name_str = 'AsyncSpreadThreaded I/O Thread: %s' % (self.name)
+            thr = threading.Thread(target=self.do_io, args=[name_str], name=name_str)
+            thr.daemon=True
+            thr.start()
+            self.io_thread_active = True
+        self.io_thread_lock.release()
+        return
 
     def start_connect(self, timeout=10):
         self.do_reconnect = True
@@ -1052,7 +1061,7 @@ class AsyncSpreadThreaded(AsyncSpread):
     def wait_for_connection(self, timeout=10):
         '''If io thread is not started, start it.
         Then wait up to timeout seconds for connection to be completed.'''
-        if not self.io_thread.isSet():
+        if not self.io_thread_active:
             print 'wait_for_connection(): really firing up IO thread'
             self.start_io_thread()
         print 'wait_for_connection(): Waiting up to %0.3f seconds for io_ready to be set()' % (timeout)

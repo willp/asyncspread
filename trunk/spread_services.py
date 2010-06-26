@@ -1,0 +1,88 @@
+import struct
+
+class ServiceTypes(object):
+    # Classes of service:
+    UNRELIABLE_MESS = 0x00000001
+    RELIABLE_MESS = 0x00000002
+    FIFO_MESS  = 0x00000004
+    CAUSAL_MESS = 0x00000008
+    AGREED_MESS = 0x00000010
+    SAFE_MESS  = 0x00000020
+
+    # Message Actions
+    JOIN = 0x00010000
+    LEAVE = 0x020000
+    KILL = 0x00040000
+
+    SEND = SAFE_MESS
+    SELF_DISCARD = 0x00000040 # A flag to disable refelction back of one's own message
+    SEND_NOREFLECT = SEND | SELF_DISCARD
+
+    # Message Types
+    REGULAR_MESS = 0x0000003f
+    REG_MEMB_MESS = 0x00001000
+    TRANSITION_MESS = 0x00002000
+    MEMBERSHIP_MESS = 0x00003f00
+
+    # Membership Change Reasons
+    CAUSED_BY_JOIN = 0x00000100
+    CAUSED_BY_LEAVE = 0x00000200
+    CAUSED_BY_DISCONNECT = 0x00000400
+    CAUSED_BY_NETWORK = 0x00000800
+
+class SpreadProto(object):
+    MAX_GROUP_LEN = 32
+    GROUP_FMT = '%ds' % (MAX_GROUP_LEN)
+    HEADER_FMT = 'I%ssIII' % (MAX_GROUP_LEN)
+
+    (VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH) = (4, 1, 0)
+
+    # Pre-create some format strings
+    # Don't send to more than MAX_GROUPS groups at once, increase if necessary
+    MAX_GROUPS = 1000
+    # This list will consume 1000*3 = 3 KB, plus overhead.  Worth it to spend the RAM.
+    GROUP_FMTS = [ GROUP_FMT * i for i in xrange(MAX_GROUPS) ]
+
+    # Encoded message headers
+    JOIN_PKT = struct.pack('!I', ServiceTypes.JOIN)
+    LEAVE_PKT = struct.pack('!I', ServiceTypes.LEAVE)
+    KILL_PKT = struct.pack('!I', ServiceTypes.KILL)
+
+    # Handshake message parts
+    AUTH_PKT = struct.pack('90s', 'NULL')
+
+    def __init__(self):
+        self.set_level()
+
+    def set_level(self, default_type=ServiceTypes.SAFE_MESS):
+        self.default_type = default_type
+        self.send_pkt = struct.pack('!I', default_type)
+        self.send_pkt_selfdisc = struct.pack('!I', default_type | ServiceTypes.SELF_DISCARD)
+
+    @staticmethod
+    def protocol_create(svcType, mesgtype, private_name, group_names, data_len=0):
+        #print 'protocol_create(len(svctype)=%d, mesgtype=%s, private_name=%s, group_names=%s, data_len=%d)' % (len(svcType), mesgtype, private_name, group_names, data_len)
+        mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
+        msg_hdr = struct.pack('>32sI4sI', private_name, len(group_names), mesgtype_str, data_len)
+        grp_tag  = SpreadProto.GROUP_FMTS[len(group_names)] # '32s' * len(gname)
+        grp_hdr = struct.pack(grp_tag, *group_names)
+        hdr = ''.join((svcType, msg_hdr, grp_hdr))
+        return hdr
+
+    @staticmethod
+    def protocol_connect(my_name, membership_notifications=True, priority_high=False):
+        name_len = len(my_name)
+        mem_opts = 0x00
+        if membership_notifications:
+            mem_opts |= 0x01
+        if priority_high:
+            mem_opts |= 0x10
+        connect_fmt = '!5B%ds' % name_len
+        #print 'connect_fmt:', connect_fmt, 'args', (4, 1, 0, mem_opts, name_len, my_name)
+        return struct.pack(connect_fmt, SpreadProto.VERSION_MAJOR, SpreadProto.VERSION_MINOR, SpreadProto.VERSION_PATCH, mem_opts, name_len, my_name)
+
+    def get_send_pkt(self, self_discard):
+        if self_discard:
+            return self.send_pkt_selfdisc
+        return self.send_pkt
+

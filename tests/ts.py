@@ -2,6 +2,7 @@
 import time, sys, logging, threading, random
 sys.path.append('.')
 import asyncspread
+import spread_services
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
@@ -11,7 +12,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.INFO)
+setup_logging(logging.DEBUG)
 
 class MyListener(asyncspread.SpreadPingListener):
     def handle_ping(self, success, elapsed):
@@ -51,10 +52,16 @@ listener2.set_group_cb('gr1', asyncspread.GroupCallback(cb_data=data_cb,
 myname = 'rb01-%03d' % (int(time.time()*10) % 1000)
 #myname = 'rb01'
 #print 'My name is: "%s"' % myname
-print 'Connecting to %s' % (sys.argv[1])
-sp1 = asyncspread.AsyncSpreadThreaded(myname, sys.argv[1], 24999, listener=listener2)
-sp1.set_level(asyncspread.ServiceTypes.UNRELIABLE_MESS)
-time.sleep(1)
+try:
+    port = int(sys.argv[2])
+    print 'port is:', port
+except:
+    port = 24999
+sp1 = asyncspread.AsyncSpreadThreaded(myname, sys.argv[1], port, listener=listener2)
+print 'Connecting to %s:%d' % (sys.argv[1], port)
+sp1.set_level(spread_services.ServiceTypes.UNRELIABLE_MESS)
+sp1.start_connect()
+time.sleep(2)
 ret = sp1.connected
 print 'Connected?', ret
 if ret:
@@ -63,7 +70,7 @@ if ret:
 for g in ('gr1', 'group2', 'gr2', 'gr5'):
     sp1.join(g)
 
-#sp1.loop(1)
+sp1.loop(1)
 for i in xrange(1, 16):
     if sp1.dead:
         break

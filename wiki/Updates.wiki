@@ -2,6 +2,14 @@
 
 = Latest News =
 
+== July 10, 2010 ===
+
+It's been a while since I've updated this page, so here it is.  I am struggling with the conversion of the code to the threaded model.  I'm just not excited about the guts of the internal scheduler.  It's really gross and must change.  The subclass for threaded usage is a bit painful.  It works, but it's clumsy.  I've been trying to spy on other open source projects' methods, and it seems that there aren't very many APIs which implement both single-threaded and (real) multi-threaded usage models.  If you know of any, please let me know.  I would prefer to borrow someone else's wheel than reinvent one myself.
+
+Other aspects of the code are shaping up, too.  I broke the code out of one big file, into 3 separate files.  The message classes all end up in message.py, and the service code in service.py, with the main class staying in asyncspread.py.  I'm hopeful that this will make it a little cleaner to roll up into a single package (with a __init__.py file specifying the three files in __all__).  I've only messed around with that way of packaging python code, so I'll have to bone up on the details and start to work out the details of setuptools/dist/pip/etc.  Packaging up for PyPI is a big goal.
+
+
+
 === June 5, 2010 ===
 
 I put some effort into cleaning up the threading model.  It's a lot more complicated than I like, at the moment.  Subclassing AsyncSpread as AsyncSpreadThreaded has resulted in a really overly complicated object model.  I can barely understand the execution path, when the subclass jumps between over-ridden methods and parent methods.  This is a clear sign that I haven't really figured out the inheritance model for a threaded subclass.  The ultimate goal is to have a very intuituve class model, where you can drop in a threaded AsyncSpread object in place of a non-threaded object, and painlessly get almost identical functionality. I'm a bit far from that.

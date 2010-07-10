@@ -1,4 +1,4 @@
-#!/usr/bin/python2.4 -u
+#!/usr/bin/python2.4
 import time, sys, logging
 sys.path.append('.')
 import asyncspread

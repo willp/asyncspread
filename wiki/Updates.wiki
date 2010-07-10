@@ -8,6 +8,52 @@ It's been a while since I've updated this page, so here it is.  I am struggling 
 
 Other aspects of the code are shaping up, too.  I broke the code out of one big file, into 3 separate files.  The message classes all end up in message.py, and the service code in service.py, with the main class staying in asyncspread.py.  I'm hopeful that this will make it a little cleaner to roll up into a single package (with a __init__.py file specifying the three files in __all__).  I've only messed around with that way of packaging python code, so I'll have to bone up on the details and start to work out the details of setuptools/dist/pip/etc.  Packaging up for PyPI is a big goal.
 
+Notes from today's hacking on the code:
+  * rename self.private_name to self.session_name
+  * eliminated session_up, convert all tests to: {{{ self.session_name is not None }}}
+
+Identified need to clean up:
+  * self.shutdown, self.dead, self.session_name, self.connected, self.io_ready, self.io_active, and self.do_reconnect - there should be fewer and less confusingly named values, with proper leading _ on whatever survives.
+  * Also must clean up/unify self.poll() and self.loop(), self.do_io(), self.start_connect(), self.wait_for_connection(), self._do_connect(), 
+
+
+Object member variables and their usage:
+
+self.dead:
+  * starts False
+  * set to True in asyncore over-ridden self.handle_close()
+  * set to True in self._drop()
+  * cleared (set to False) in self._do_connect() immediately before self.connect()
+  * Checked in self.wait_for_connection() - causes return False, breaking out of loop
+  * Checked in self.poll() - causes poll() to return False immediately
+  * Checked in self.loop() - causes loop() to return, breaking out or skipping loop
+  * Checked in threaded self.do_io() - causes asyncore looping to skip, but doesn't stop method from looping
+
+self.shutdown:
+  * starts False
+  * set to True in self.disconnect()
+  * Checked in threaded self.do_io() - causes IO thread loop to exit and thread to terminate
+  * Checked twice in threaded self.do_io() - checked to stop pulling messages off out_queue in loop that sends them via self/asynchat.push()
+
+self.io_active:
+  * starts False
+  * Checked in self.loop() - raises IOError() exception if it is set True, to avoid mix of threaded and non-threaded usage
+that's it... this looks like i need to kill it.
+
+self.io_ready: (Threading.Event)
+  * starts in AsyncSpread contructor as threading.Event()
+  * Cleared with io_ready.clear() in self._drop()
+  * Set with io_ready.set() in self.st_set_session() after self.session_name is set
+  * Cleared in threaded self.start_io_thread() while self.io_thread_lock is held locked.
+  * Waited on in threaded self.wait_for_connection() with io_ready.wait(timeout)
+
+self.connected: (from socket)
+  * not checked except to force it to False in self._drop() if it is set to True, only happens in python 2.4, not in python 2.6+
+
+I clearly need to do some refactoring here.  I probably need to separate the admin from the operational state of the connection.  Also, the API for dealing with connection-state is pretty gross.  Then there's the two completely different event loops and lots of cut n paste between poll(), loop(), and do_io().  That's not smart.
+
+It's nice to go away from the code for a while and return to it with fresh eyes and a fresh mind.  Now on to fixing the messiness.
+
 
 
 === June 5, 2010 ===

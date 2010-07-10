@@ -2,7 +2,7 @@
 import time, sys, logging, threading, random
 sys.path.append('.')
 import asyncspread
-import spread_services
+import services
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
@@ -52,20 +52,21 @@ listener2.set_group_cb('gr1', asyncspread.GroupCallback(cb_data=data_cb,
 myname = 'rb01-%03d' % (int(time.time()*10) % 1000)
 #myname = 'rb01'
 #print 'My name is: "%s"' % myname
-try:
+host = 'localhost'
+port = 24999
+if len(sys.argv) > 1:
+    host = sys.argv[1]
+if len(sys.argv) > 2:
     port = int(sys.argv[2])
-    print 'port is:', port
-except:
-    port = 24999
-sp1 = asyncspread.AsyncSpreadThreaded(myname, sys.argv[1], port, listener=listener2)
-print 'Connecting to %s:%d' % (sys.argv[1], port)
-sp1.set_level(spread_services.ServiceTypes.UNRELIABLE_MESS)
+sp1 = asyncspread.AsyncSpreadThreaded(myname, host, port, listener=listener2)
+print 'Connecting to %s:%d' % (host, port)
+sp1.set_level(services.ServiceTypes.UNRELIABLE_MESS)
 sp1.start_connect()
 time.sleep(2)
 ret = sp1.connected
 print 'Connected?', ret
 if ret:
-    print 'my private name is:', sp1.private_name
+    print 'my private session name is:', sp1.session_name
     sp1.start_io_thread()
 for g in ('gr1', 'group2', 'gr2', 'gr5'):
     sp1.join(g)

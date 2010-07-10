@@ -30,9 +30,15 @@ class MyListener(asyncspread.SpreadPingListener):
 #listener = asyncspread.SpreadPingListener()
 map=dict()
 listener = MyListener()
-sp1 = asyncspread.AsyncSpread(myname1, sys.argv[1], 24999, listener=listener,map=map)
+host = 'localhost'
+port = 24999
+if len(sys.argv) > 1:
+    host = sys.argv[1]
+if len(sys.argv) > 2:
+    port = int(sys.argv[2])
+sp1 = asyncspread.AsyncSpread(myname1, host, port, listener=listener,map=map)
 print 'SP1 is:', sp1
-sp2 = asyncspread.AsyncSpread(myname2, sys.argv[1], 24999, listener=listener, map=map)
+sp2 = asyncspread.AsyncSpread(myname2, host, port, listener=listener, map=map)
 sp1.start_connect()
 sp2.start_connect()
 print 'My map:', map

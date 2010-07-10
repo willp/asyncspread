@@ -1,4 +1,4 @@
-from spread_services import *
+from services import *
 
 class SpreadMessage(object):
     def _set_data(self, data):

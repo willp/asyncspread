@@ -1,7 +1,8 @@
 import struct
 
 class ServiceTypes(object):
-    # Classes of service:
+    '''Spread Service Types and protocol values
+    implemented as class-scoped enumerated values.'''
     UNRELIABLE_MESS = 0x00000001
     RELIABLE_MESS = 0x00000002
     FIFO_MESS  = 0x00000004
@@ -60,10 +61,10 @@ class SpreadProto(object):
         self.send_pkt_selfdisc = struct.pack('!I', default_type | ServiceTypes.SELF_DISCARD)
 
     @staticmethod
-    def protocol_create(svcType, mesgtype, private_name, group_names, data_len=0):
-        #print 'protocol_create(len(svctype)=%d, mesgtype=%s, private_name=%s, group_names=%s, data_len=%d)' % (len(svcType), mesgtype, private_name, group_names, data_len)
+    def protocol_create(svcType, mesgtype, session_name, group_names, data_len=0):
+        #print 'protocol_create(len(svctype)=%d, mesgtype=%s, session_name=%s, group_names=%s, data_len=%d)' % (len(svcType), mesgtype, session_name, group_names, data_len)
         mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
-        msg_hdr = struct.pack('>32sI4sI', private_name, len(group_names), mesgtype_str, data_len)
+        msg_hdr = struct.pack('>32sI4sI', session_name, len(group_names), mesgtype_str, data_len)
         grp_tag  = SpreadProto.GROUP_FMTS[len(group_names)] # '32s' * len(gname)
         grp_hdr = struct.pack(grp_tag, *group_names)
         hdr = ''.join((svcType, msg_hdr, grp_hdr))
@@ -85,4 +86,3 @@ class SpreadProto(object):
         if self_discard:
             return self.send_pkt_selfdisc
         return self.send_pkt
-

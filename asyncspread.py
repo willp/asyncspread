@@ -419,13 +419,11 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self._clear_ibuffer()
         #
         self.session_name = None
-        self.session_up = False
         self.msg_count = 0
         # deal with timer:
         self.timer_interval = timer_interval
         self._reset_timer()
         # more settings
-        self.queue_joins = []
         self.dead = False
         # state machine for protocol processing uses these
         self.need_bytes = 0
@@ -436,8 +434,8 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.do_reconnect = False
         self.shutdown = False
 
-    def __str__(self):
-        return '<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s"' % (self.__class__, self.name, self.connected, self.host, self.port, self.session_name)
+    def __str__(self): # TODO: remove self.dead and self.shutdown from this!
+        return '<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s", dead=%s, shutdown=%s' % (self.__class__, self.name, self.connected, self.host, self.port, self.session_name, self.dead, self.shutdown)
 
     def _do_connect(self):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -482,7 +480,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
     def loop(self, timeout=None, slice=0.1):
         '''factor out expire_every into a generalized timer that calls up into listener'''
         if self.io_active:
-            print 'ERROR: using loop() at same time as background IO thread is not valid/smart.'
+            print 'ERROR: using loop() at same time as background IO thread is not valid.'
             raise IOError('Cannot do asyncore IO in two different threads')
         main_loop = 0
         timeout = timeout / slice
@@ -511,8 +509,8 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
             return self._unpack_header
 
     def _clear_ibuffer(self):
-        self.ibuffer = ''
-        self.ibuffer_start = 0
+        self._ibuffer = ''
+        self._ibuffer_start = 0
 
     def _reset_timer(self, delay=None):
         if delay is None:
@@ -553,13 +551,13 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
     def _drop(self):
         self.io_ready.clear()
         self.dead = True
-        self.session_up = False
         self.close() # changes self.connected to False, usually
         self.discard_buffers()
         self._clear_ibuffer()
-        self.session_name = None
         if self.connected:
+            self.logger.warning('WARNING: _drop() found self.connected = True and just set it to False!')
             self.connected = False
+        self.session_name = None
 
     def _send(self, data):
         self.push(data)
@@ -568,30 +566,27 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         listener = self.listener
         if listener is not None:
             # Listeners should not throw exceptions here
-            if isinstance(message, MembershipMessage):
-                listener._process_membership(self, message)
-            elif isinstance(message, DataMessage):
+            if isinstance(message, DataMessage):
                 listener._process_data(self, message)
+            elif isinstance(message, MembershipMessage):
+                listener._process_membership(self, message)
             elif isinstance(message, OpaqueMessage):
-                # opaque messages go here. TODO: convert to logging
-                print 'Unknown message received as OpaqueMessage:', message
-                print 'NO handling known/possible...'
-                print 'Ignoring unparsed opaque message'
                 # let's hope this never happens
+                self.logger.critical('Unknown message received (and ignored) as OpaqueMessage: %s' (message))
             else:
-                # this never happens. assert() here
-                assert message, 'Unexpected type of message: %s' % (type(message))
+                # this never happens. assert here
+                assert message, 'Code error! Unexpected type of message: %s' % (type(message))
 
     def collect_incoming_data(self, data):
         '''Buffer the data'''
-        self.ibuffer += data
+        self._ibuffer += data
 
     def found_terminator(self):
-        data = self.ibuffer[self.ibuffer_start:(self.ibuffer_start+self.need_bytes)]
-        self.ibuffer_start += self.need_bytes
-        if len(self.ibuffer) > 500:
-            self.ibuffer = self.ibuffer[self.ibuffer_start:]
-            self.ibuffer_start = 0
+        data = self._ibuffer[self._ibuffer_start:(self._ibuffer_start+self.need_bytes)]
+        self._ibuffer_start += self.need_bytes
+        if len(self._ibuffer) > 500: # TODO: remove hard coded value here
+            self._ibuffer = self._ibuffer[self._ibuffer_start:]
+            self._ibuffer_start = 0
         next_cb = self.next_state
         next_cb(data)
 
@@ -645,10 +640,10 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
             self.listener._process_error(self, SpreadException(version))
             return
         self.server_version = (majorVersion, minorVersion, patchVersion)
-        self.wait_bytes(1, self.st_read_session_name)
+        self.wait_bytes(1, self.st_read_session_namelen)
 
-    def st_read_session_name(self, data):
-        self.logger.debug('STATE: st_read_session_name')
+    def st_read_session_namelen(self, data):
+        self.logger.debug('STATE: st_read_session_namelen')
         (group_len,) = struct.unpack('b', data)
         if group_len == -1:
             self._drop()
@@ -658,10 +653,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
 
     def st_set_session(self, data):
         self.logger.debug('STATE: st_set_session')
-        self.session_name = data
-        self.session_up = True
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
         self.logger.info('My private session name for this connection is: "%s"' % (self.session_name))
+        self.session_name = data
         self.io_ready.set()
         self.listener._process_connected(self)
         self.wait_bytes(48, self.st_read_header)
@@ -741,7 +735,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.shutdown = True
         return True
 
-    def multicast(self, groups, message, mesg_type, self_discard=True, service_type=ServiceTypes.SAFE_MESS):
+    def multicast(self, groups, message, mesg_type, self_discard=True):
         '''Send a message to all members of a group.
 
         @param groups: group list (string)
@@ -756,7 +750,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         if self.session_name is None:
             self.logger.critical('Not connected to spread. Cannot send multicast message to group(s) "%s"' % (groups))
             raise SpreadException(100)
-        #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
+        #print 'multicast(groups=%s, message=%s, mesg_type=%d, self_discard=%s)' % (groups, message, mesg_type, self_discard)
         data_len = len(message)
         svc_type_pkt = self.proto.get_send_pkt(self_discard)
         header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.session_name, groups, data_len)
@@ -797,13 +791,14 @@ class AsyncSpreadThreaded(AsyncSpread):
     to throw the flag or not.
     '''
     def __init__(self, *args, **kwargs):
-        kwargs['map'] = dict() # ensure all instances get their own distinct map object
+        kwargs['map'] = dict() # ensure all instances get their own distinct map object, to prevent asyncore from exploding
         self.my_map = kwargs['map']
         AsyncSpread.__init__(self, *args, **kwargs)
         print 'NonThreaded constructor done, Threaded stuff happening now'
-        self.io_thread = threading.Event() # TODO: thread only
+        # Threading related concurrency controls
         self.io_thread_lock = threading.Lock()
-        self.io_thread_active = False
+        self.io_thread = None
+        # more settings
         self.do_reconnect = True
         # outbound messages for threaded uses
         self.out_queue = deque()
@@ -814,18 +809,18 @@ class AsyncSpreadThreaded(AsyncSpread):
     def start_io_thread(self):
         '''This is now thread-safe
         1. obtain lock on io_thread_lock (BLOCKING)
-        2. check self.io_thread_active
+        2. check self.io_thread is None
         3. if False, start thread and set True
         4. else release lock and return
         '''
         self.io_thread_lock.acquire() #blocks
-        if not self.io_thread_active:
+        if self.io_thread is None:
             self.io_ready.clear()
             name_str = 'AsyncSpreadThreaded I/O Thread: %s' % (self.name)
             thr = threading.Thread(target=self.do_io, args=[name_str], name=name_str)
             thr.daemon=True
             thr.start()
-            self.io_thread_active = True
+            self.io_thread = thr
         self.io_thread_lock.release()
         return
 
@@ -837,12 +832,13 @@ class AsyncSpreadThreaded(AsyncSpread):
     def wait_for_connection(self, timeout=10):
         '''If io thread is not started, start it.
         Then wait up to timeout seconds for connection to be completed.'''
-        if not self.io_thread_active:
+        if self.io_thread is None:
             print 'wait_for_connection(): really firing up IO thread'
             self.start_io_thread()
         print 'wait_for_connection(): Waiting up to %0.3f seconds for io_ready to be set()' % (timeout)
         self.io_ready.wait(timeout)
-        return self.session_name is not None
+        is_connected = self.session_name is not None
+        return is_connected
 
     def do_io(self, thr_name):
         '''This is the main IO thread's main loop for threaded asyncspread usage...  It
@@ -854,9 +850,9 @@ class AsyncSpreadThreaded(AsyncSpread):
         
         This logic is insane.  Needs MAJOR help / refactoring.
         '''
-        me = threading.local()
+        me = threading.local() # This isn't really used yet
         me.thr_name = thr_name
-        print 'Doing io in do_io()'
+        print '%s>> Doing io in do_io()' % (thr_name)
         main_loop = 0
         while not self.shutdown:
             main_loop += 1
@@ -876,12 +872,10 @@ class AsyncSpreadThreaded(AsyncSpread):
                     # deliver queued up outbound data
                     while len(self.out_queue) > 0 and not self.shutdown:
                         self.push(self.out_queue.popleft())
-                    # perform queued joins
-                    if len(self.queue_joins) > 0 and not self.shutdown:
-                        self.logger.debug('Joining >pending< groups: %s' % self.queue_joins)
-                        while len(self.queue_joins) > 0:
-                            self.join(self.queue_joins.pop())
-        print 'IO Thread exiting'
+            else:
+                # need to do something non-CPU intensive here
+                time.sleep(0.5)
+        print '%s>> IO Thread exiting' % (thr_name)
         self._drop()
 
     def loop(self, timeout=None, slice=0.001):

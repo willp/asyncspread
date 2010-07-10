@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2.4
 import time, sys, logging, threading, random
 sys.path.append('.')
 import asyncspread
@@ -12,7 +12,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.DEBUG)
+setup_logging(logging.INFO)
 
 class MyListener(asyncspread.SpreadPingListener):
     def handle_ping(self, success, elapsed):
@@ -94,7 +94,7 @@ for i in xrange(1, 16):
         sp1.leave('gr1')
         sp1.join('gr2')
         sp1.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff, self_discard=False)
-    sp1.multicast(['gr1'], "A" * 900, 0, self_discard=False) # send big message
+    sp1.multicast(['gr1'], "A" * 90, 0, self_discard=False) # send big message
     #sp1.loop(1)
     time.sleep(1)
     print

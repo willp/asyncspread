@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback, itertools
 from collections import deque
-from spread_message import *
-from spread_services import *
+from message import *
+from services import *
 
 '''This code is released for use under the Gnu Public License V3 (GPLv3).
 
@@ -151,12 +151,11 @@ class SpreadPingListener(SpreadListener):
         pktloss = self.ping_recv / self.ping_sent * 100.0
         return pktloss
 
-
     def _process_data(self, conn, message):
         data = message.data
         if (message.mesg_type == self.ping_mtype and
             len(message.groups) == 1 and
-            message.sender == conn.private_name and
+            message.sender == conn.session_name and
             len(data) > 0):
             (head, ping_id, timestamp) = data.split(':')
             ping_id = int(ping_id)
@@ -199,7 +198,7 @@ class SpreadPingListener(SpreadListener):
         mesg_type = self.ping_mtype
         self.ping_callbacks[this_id] = (callback, time.time(), timeout)
         self.ping_sent += 1
-        conn.unicast(conn.private_name, payload, mesg_type)
+        conn.unicast(conn.session_name, payload, mesg_type)
 
 class GroupCallback(object):
     '''Container class for callbacks about a group.'''
@@ -381,7 +380,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
                  timer_interval=1.0,
                  keepalive=True,
                  map=None):
-        '''Create object representing asynchronous connection to a spread daemon.
+        '''Asynchronous connection to a spread daemon, non-threaded, based on asyncore.asynchat
 
         @param name: your unique self-identifier, no more than 10 characters long, unique to this server
         @type name: str
@@ -419,7 +418,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.mfactory = None
         self._clear_ibuffer()
         #
-        self.private_name = None
+        self.session_name = None
         self.session_up = False
         self.msg_count = 0
         # deal with timer:
@@ -438,7 +437,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.shutdown = False
 
     def __str__(self):
-        return '<%s>: name="%s", connected=%s, server="%s:%d", private_name="%s"' % (self.__class__, self.name, self.connected, self.host, self.port, self.private_name)
+        return '<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s"' % (self.__class__, self.name, self.connected, self.host, self.port, self.session_name)
 
     def _do_connect(self):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -465,14 +464,14 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         '''Spend time in self.poll() until the timeout expires, or we are connected, whichever first.
         Return boolean indicating if we are connected yet.  Or not.'''
         time_end = time.time() + timeout
-        while self.private_name is None and time.time() < time_end:
+        while self.session_name is None and time.time() < time_end:
             print 'Waiting for connection...'
             if self.dead:
                 return False
             self.poll(timeout/100)
             time.sleep(sleep_delay)
-        print 'wait_for_connection() returning. private_name:', self.private_name
-        return self.private_name is not None
+        print 'wait_for_connection() returning. session_name:', self.session_name
+        return self.session_name is not None
 
     def poll(self, timeout=0.001):
         if self.dead:
@@ -537,7 +536,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
     def handle_close(self):
         self.logger.warning('Connection lost to server: %s:%d' % (self.host, self.port))
         self.dead = True
-        self.private_name = None
+        self.session_name = None
         self.mfactory = None
         self.close()
         self.listener._process_dropped(self)
@@ -558,7 +557,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.close() # changes self.connected to False, usually
         self.discard_buffers()
         self._clear_ibuffer()
-        self.private_name = None
+        self.session_name = None
         if self.connected:
             self.connected = False
 
@@ -646,23 +645,23 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
             self.listener._process_error(self, SpreadException(version))
             return
         self.server_version = (majorVersion, minorVersion, patchVersion)
-        self.wait_bytes(1, self.st_read_private_name)
+        self.wait_bytes(1, self.st_read_session_name)
 
-    def st_read_private_name(self, data):
-        self.logger.debug('STATE: st_read_private_name')
+    def st_read_session_name(self, data):
+        self.logger.debug('STATE: st_read_session_name')
         (group_len,) = struct.unpack('b', data)
         if group_len == -1:
             self._drop()
             self.listener._process_error(self, SpreadException(group_len))
             return
-        self.wait_bytes(group_len, self.st_set_private)
+        self.wait_bytes(group_len, self.st_set_session)
 
-    def st_set_private(self, data):
-        self.logger.debug('STATE: st_set_private')
-        self.private_name = data
+    def st_set_session(self, data):
+        self.logger.debug('STATE: st_set_session')
+        self.session_name = data
         self.session_up = True
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
-        self.logger.info('My private name for this connection is: "%s"' % (self.private_name))
+        self.logger.info('My private session name for this connection is: "%s"' % (self.session_name))
         self.io_ready.set()
         self.listener._process_connected(self)
         self.wait_bytes(48, self.st_read_header)
@@ -717,25 +716,25 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self._dispatch(factory_mesg)
 
     def join(self, group):
-        if self.private_name is None:
+        if self.session_name is None:
             self.logger.critical('Not connected to spread. Cannot join group "%s"' % (group))
             raise SpreadException(100) # not connected
-        send_head = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.private_name, [group], 0)
+        send_head = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.session_name, [group], 0)
         self._send(send_head)
         return True
 
     def leave(self, group):
-        if self.private_name is None:
-            self.logger.critical('No private channel name known yet from server... Failed leave() message')
+        if self.session_name is None:
+            self.logger.critical('No session established with server... Failed leave() message')
             return False
-        send_head = SpreadProto.protocol_create(SpreadProto.LEAVE_PKT, 0, self.private_name, [group], 0)
+        send_head = SpreadProto.protocol_create(SpreadProto.LEAVE_PKT, 0, self.session_name, [group], 0)
         self._send(send_head)
         return True
 
     def disconnect(self):
-        if self.private_name is None:
+        if self.session_name is None:
             return False # is we're not connected, just return False instead of raising an exception
-        who = self.private_name
+        who = self.session_name
         send_head = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
         self._send(send_head)
         self._drop()
@@ -754,13 +753,13 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         @param self_discard: set to True to stop server from reflecting message back to me
         @type self_discard: bool
         '''
-        if self.private_name is None:
+        if self.session_name is None:
             self.logger.critical('Not connected to spread. Cannot send multicast message to group(s) "%s"' % (groups))
             raise SpreadException(100)
         #print 'multicast(groups=%s, message=%s, mesg_type=%d)' % (groups, message, mesg_type)
         data_len = len(message)
         svc_type_pkt = self.proto.get_send_pkt(self_discard)
-        header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.private_name, groups, data_len)
+        header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.session_name, groups, data_len)
         pkt = header + message
         self._send(pkt)
         return True
@@ -843,7 +842,7 @@ class AsyncSpreadThreaded(AsyncSpread):
             self.start_io_thread()
         print 'wait_for_connection(): Waiting up to %0.3f seconds for io_ready to be set()' % (timeout)
         self.io_ready.wait(timeout)
-        return self.private_name is not None
+        return self.session_name is not None
 
     def do_io(self, thr_name):
         '''This is the main IO thread's main loop for threaded asyncspread usage...  It
@@ -865,7 +864,7 @@ class AsyncSpreadThreaded(AsyncSpread):
             if self._is_timer():
                 self.listener._process_timer(self)
             # handle reconnect
-            if self.do_reconnect and not self.private_name:
+            if self.do_reconnect and not self.session_name:
                 self.do_reconnect = False # reset flag
                 print 'IO thread trying to self._do_connect()...  reset do_reconnect to False'
                 self._do_connect()
@@ -873,7 +872,7 @@ class AsyncSpreadThreaded(AsyncSpread):
             if not self.dead:
                 asyncore.loop(timeout=0.01, count=2, use_poll=True, map=self.my_map)
                 # make sure not to deliver any messages if the session isn't ready
-                if self.private_name:
+                if self.session_name:
                     # deliver queued up outbound data
                     while len(self.out_queue) > 0 and not self.shutdown:
                         self.push(self.out_queue.popleft())

@@ -52,8 +52,11 @@ self.connected: (from socket)
 
 I clearly need to do some refactoring here.  I probably need to separate the admin from the operational state of the connection.  Also, the API for dealing with connection-state is pretty gross.  Then there's the two completely different event loops and lots of cut n paste between {{{ poll(), loop(), and do_io() }}}.  That's not smart.
 
-It's nice to go away from the code for a while and return to it with fresh eyes and a fresh mind.  Now on to fixing the messiness.
+It's nice to go away from the code for a while and return to it with fresh eyes and a fresh mind.  Now on to fixing the messiness... I think one criteria of a good design here is that the API should be nearly identical between threaded/nonthreaded use, and there should be minimal duplication of code.  Also, there shouldn't be any ambiguity about the 'state' of the connection.
 
+*API Fixes*
+
+Added a start_connect=(True|False) option to the {{{ AsyncSpread and AsyncSpreadThreaded }}} constructors, to simplify usage and avoid extra work in client applications.  I purposefully avoided permitting the threaded class from having the superclass invoke the start_connect() method, to ensure the call ordering is absolutely clear.  It's a bit hackish, but so is having a constructor that also performs a connect() operation somewhat abstractly.  So, I'm fine with the 3 extra lines of code that ensure the superclass doesn't try to start_connect().
 
 
 

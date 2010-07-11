@@ -1,7 +1,7 @@
 #!/usr/bin/python2.4
 import time, sys, logging
 sys.path.append('.')
-import asyncspread
+from asyncspread import asyncspread
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()

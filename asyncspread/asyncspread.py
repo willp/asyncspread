@@ -4,6 +4,8 @@ from collections import deque
 from message import *
 from services import *
 
+__version__ = '0.1.2' # used by setup.py
+
 '''This code is released for use under the Gnu Public License V3 (GPLv3).
 
 Thanks to Qingfeng for the initial version of code that inspired this rewrite.
@@ -392,8 +394,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
     timeout)
     
     * and much more!
-    
-    '''
+    ''' # docstring used by setup.py
     def __init__(self, name, host, port,
                  listener=None,
                  membership_notifications=True,

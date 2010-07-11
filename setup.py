@@ -9,7 +9,7 @@ setup (name = 'asyncspread',
     author = 'J. Will Pierce',
     author_email = 'willp@nuclei.com',
     license = 'GNU Lesser General Public License 3 or later',
-    requires=['Python (>=2.4)', 'Python(<3.0)'],
+    requires=['Python(>=2.4)', 'Python(<3.0)'],
     long_description = asyncspread.AsyncSpread.__doc__,
     url = 'http://http://code.google.com/p/asyncspread/',
     # may change to a wiki page for downloading the latest version:

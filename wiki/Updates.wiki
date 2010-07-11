@@ -2,6 +2,41 @@
 
 = Latest News =
 
+=== July 11, 2010 ===
+
+Still have lots of refactoring to do on the IO event loop and on the connection state tracking, but I took a side trip down the package-building rabbit-hole and made my first {{{ setup.py }}} script.  Again, I'm amazed at python's simplicity.  With just 8 lines of code, and technically just one import and one method call, I have a functional setup script.  I used it to build both a tarball of the code, as well as an RPM!  I wouldn't install the RPM on a production system, there's just way too much changing at the moment.  But I took the liberty of uploading the first preview release (*very* alpha!) of the asyncspread code as asyncspread-0.1.0.tar.gz in the Downloads tab of this google code project.  
+
+Here is what it contains:
+{{{
+ # tar tvfz dist/asyncspread-0.1.0.tar.gz 
+ drwxrwxr-x willp/willp       0 2010-07-11 09:36 asyncspread-0.1.0/
+ -rwxrwxr-x willp/willp     321 2010-07-11 09:36 asyncspread-0.1.0/setup.py
+ drwxrwxr-x willp/willp       0 2010-07-11 09:36 asyncspread-0.1.0/asyncspread/
+ -rw-rw-r-- willp/willp    5477 2010-07-11 09:31 asyncspread-0.1.0/asyncspread/message.py
+ -rw-rw-r-- willp/willp    3282 2010-07-11 09:31 asyncspread-0.1.0/asyncspread/services.py
+ -rwxrwxr-x willp/willp   40812 2010-07-11 09:31 asyncspread-0.1.0/asyncspread/asyncspread.py
+ -rw-rw-r-- willp/willp      51 2010-07-11 09:31 asyncspread-0.1.0/asyncspread/__init__.py
+ -rw-rw-r-- willp/willp     257 2010-07-11 09:36 asyncspread-0.1.0/PKG-INFO
+}}}
+
+I'm embarrassed to realize now that the main filename probably shouldn't be the same as the package name.  It's a bit weird to import asyncspread.asyncspread to get the main AsyncSpread class imported...  So I'm likely going to change the main filename to something like connection.py and perhaps even split out the listener code into a listener.py file, and the exceptions.  
+
+This file reorganization is overdue.  And, for too long I have needed to learn how to build distributable python packages.  It's pretty hard to contribute to the python community without building proper packages.  I've got my PyPI account set up now, and once I get a little further down the packaging and file organization road, I expect to release this as a 1.0 release that will have a pretty stable API and lots of documentation.
+
+For now, though, 0.1.0 is the current "release" version, so feel free to download the tarball and experiment.  Note: the test scripts are NOT included, so you will have to check those out using the SVN browser or an SVN client.
+
+I'm still amazed at how simple it is to build an RPM using distutils (setup.py).  I have to learn a lot more still, including how to specify arbitrary options to rpmbuild, like setting the options for rpmbuild version 5 to tell it to build an rpm 4 compatible RPM:
+{{{
+# this tells RPM v5 to build an RPM that RPM v4 will work with:
+%define _binary_payload w9.bzdio
+%global _binary_filedigest_algorithm 1
+%global _source_filedigest_algorithm 1
+}}}
+
+Somehow that's got to get passed into the specfile for rpmbuild by way of the {{{ bdist_rpm }}} subcommand to setup.py.  Ah, well, I'll figure that out later.  Maybe if I look at how things like python-dns or python-simplejson are packaged up by the Fedora/redhat crew, that will help.
+
+
+
 == July 10, 2010 ===
 
 It's been a while since I've updated this page, so here it is.  I am struggling with the conversion of the code to the threaded model.  I'm just not excited about the guts of the internal scheduler.  It's really gross and must change.  The subclass for threaded usage is a bit painful.  It works, but it's clumsy.  I've been trying to spy on other open source projects' methods, and it seems that there aren't very many APIs which implement both single-threaded and (real) multi-threaded usage models.  If you know of any, please let me know.  I would prefer to borrow someone else's wheel than reinvent one myself.

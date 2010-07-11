@@ -1,8 +1,7 @@
 #!/usr/bin/python2.4
 import time, sys, logging, threading, random
 sys.path.append('.')
-import asyncspread
-import services
+from asyncspread import *
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()

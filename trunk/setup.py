@@ -4,7 +4,7 @@ from asyncspread import *
 
 setup (name = 'asyncspread',
     packages = ['asyncspread'],
-    version = '0.1.1',
+    version = asyncspread.__version__,
     description = 'Asynchronous Spread Client',
     author = 'J. Will Pierce',
     author_email = 'willp@nuclei.com',

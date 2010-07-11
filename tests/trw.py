@@ -22,6 +22,10 @@ print 'I am', myname1, 'and:', myname2
 class MyListener(asyncspread.SpreadPingListener):
     def handle_data(self, conn, message):
         print 'Got message:', message, 'From connection:', conn
+    def handle_dropped(self, conn):
+        print 'DROPPED CONNECTION! Conn:', conn
+        print 'Setting reconnect to True.'
+        conn.reconnect = True
 
 #listener = asyncspread.SpreadPingListener()
 map=dict()
@@ -32,10 +36,10 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = asyncspread.AsyncSpreadThreaded(myname1, host, port, listener=listener, map=map)
+sp1 = asyncspread.AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=True, map=map)
 print 'SP1 is:', sp1
 sp1.start_connect()
-sp2 = asyncspread.AsyncSpreadThreaded(myname2, host, port, listener=listener, map=map)
+sp2 = asyncspread.AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=True, map=map)
 sp2.start_connect()
 for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ', ''):
     sp1.join(g)
@@ -52,3 +56,4 @@ while sp1.connected or sp2.connected:
     if loop > 10:
         sp1.disconnect()
         sp2.disconnect()
+time.sleep(3)

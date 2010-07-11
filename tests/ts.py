@@ -58,7 +58,7 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = asyncspread.AsyncSpreadThreaded(myname, host, port, listener=listener2)
+sp1 = asyncspread.AsyncSpreadThreaded(myname, host, port, listener=listener2, start_connect=True)
 print 'Connecting to %s:%d' % (host, port)
 sp1.set_level(services.ServiceTypes.UNRELIABLE_MESS)
 sp1.start_connect()

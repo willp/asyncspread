@@ -379,6 +379,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
                  priority_high=False,
                  timer_interval=1.0,
                  keepalive=True,
+                 start_connect=False,
                  map=None):
         '''Asynchronous connection to a spread daemon, non-threaded, based on asyncore.asynchat
 
@@ -433,6 +434,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.io_ready = threading.Event() # TODO: thread only
         self.do_reconnect = False
         self.shutdown = False
+        # handle startup connection
+        if start_connect:
+            self.start_connect()
 
     def __str__(self): # TODO: remove self.dead and self.shutdown from this!
         return '<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s", dead=%s, shutdown=%s' % (self.__class__, self.name, self.connected, self.host, self.port, self.session_name, self.dead, self.shutdown)
@@ -454,6 +458,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         print 'CONNECT:', ret
 
     def start_connect(self, timeout=10):
+        if self.connected:
+            print 'WARNING: ALREADY CONNECTED!'
+            return True
         print 'start_connect() timeout:', timeout
         self._do_connect()
         return self.wait_for_connection(timeout)
@@ -472,10 +479,11 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         return self.session_name is not None
 
     def poll(self, timeout=0.001):
-        if self.dead:
-            return False
-        asyncore.loop(timeout=timeout, count=1, map=self.my_map)
-        return True
+        if not self.dead:
+            asyncore.loop(timeout=timeout, count=1, use_poll=True, map=self.my_map)
+        if self._is_timer():
+            self.listener._process_timer(self)
+        return not self.dead
 
     def loop(self, timeout=None, slice=0.1):
         '''factor out expire_every into a generalized timer that calls up into listener'''
@@ -487,10 +495,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         print 'TIMEOUT is now:', timeout
         while not self.dead and (timeout is None or main_loop <= timeout):
             main_loop += 1
-            asyncore.loop(timeout=slice, count=1, use_poll=True, map=self.my_map)
-            # every N iterations, check for timed out pings
-            if self._is_timer():
-                self.listener._process_timer(self)
+            print 'POLL! slice:', slice, 'main_loop:', main_loop
+            self.poll(slice)
+
 
     def set_level(self, level):
         '''totally delegated to internal SpreadProto object'''
@@ -527,9 +534,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
     def handle_connect(self):
         self.mfactory = SpreadMessageFactory()
         self.logger.debug('handle_connect(): got TCP connection to server, sending credentials')
-        msg_connect = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
+        connect_msg = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
         self.wait_bytes(1, self.st_auth_read)
-        self.push(msg_connect)
+        self.push(connect_msg)
 
     def handle_close(self):
         self.logger.warning('Connection lost to server: %s:%d' % (self.host, self.port))
@@ -653,9 +660,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
 
     def st_set_session(self, data):
         self.logger.debug('STATE: st_set_session')
+        self.session_name = data
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
         self.logger.info('My private session name for this connection is: "%s"' % (self.session_name))
-        self.session_name = data
         self.io_ready.set()
         self.listener._process_connected(self)
         self.wait_bytes(48, self.st_read_header)
@@ -713,26 +720,27 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         if self.session_name is None:
             self.logger.critical('Not connected to spread. Cannot join group "%s"' % (group))
             raise SpreadException(100) # not connected
-        send_head = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.session_name, [group], 0)
-        self._send(send_head)
+        join_msg = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.session_name, [group], 0)
+        self._send(join_msg)
         return True
 
     def leave(self, group):
         if self.session_name is None:
             self.logger.critical('No session established with server... Failed leave() message')
             return False
-        send_head = SpreadProto.protocol_create(SpreadProto.LEAVE_PKT, 0, self.session_name, [group], 0)
-        self._send(send_head)
+        leave_msg = SpreadProto.protocol_create(SpreadProto.LEAVE_PKT, 0, self.session_name, [group], 0)
+        self._send(leave_msg)
         return True
 
     def disconnect(self):
         if self.session_name is None:
             return False # is we're not connected, just return False instead of raising an exception
         who = self.session_name
-        send_head = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
-        self._send(send_head)
-        self._drop()
+        disco_msg = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
+        self._send(disco_msg)
+        self.poll()
         self.shutdown = True
+        self._drop()
         return True
 
     def multicast(self, groups, message, mesg_type, self_discard=True):
@@ -793,8 +801,13 @@ class AsyncSpreadThreaded(AsyncSpread):
     def __init__(self, *args, **kwargs):
         kwargs['map'] = dict() # ensure all instances get their own distinct map object, to prevent asyncore from exploding
         self.my_map = kwargs['map']
+        # pull start_connect param out, and be sure superclass sees it as False, to avoid non-threaded
+        # I know this is a bit overkill...
+        start_connect = kwargs.get('start_connect', False)
+        kwargs['start_connect'] = False
+        # invoke superclass
         AsyncSpread.__init__(self, *args, **kwargs)
-        print 'NonThreaded constructor done, Threaded stuff happening now'
+        print 'NonThreaded constructor done, Threaded stuff happening now in AsyncSpreadThreaded'
         # Threading related concurrency controls
         self.io_thread_lock = threading.Lock()
         self.io_thread = None
@@ -802,6 +815,9 @@ class AsyncSpreadThreaded(AsyncSpread):
         self.do_reconnect = True
         # outbound messages for threaded uses
         self.out_queue = deque()
+        # handle startup
+        if start_connect:
+            self.start_connect()
 
     def _send(self, pkt):
         self.out_queue.append(pkt)
@@ -813,7 +829,7 @@ class AsyncSpreadThreaded(AsyncSpread):
         3. if False, start thread and set True
         4. else release lock and return
         '''
-        self.io_thread_lock.acquire() #blocks
+        self.io_thread_lock.acquire() # blocking
         if self.io_thread is None:
             self.io_ready.clear()
             name_str = 'AsyncSpreadThreaded I/O Thread: %s' % (self.name)
@@ -866,6 +882,7 @@ class AsyncSpreadThreaded(AsyncSpread):
                 self._do_connect()
                 continue
             if not self.dead:
+                #self.poll() # could be outside this test.
                 asyncore.loop(timeout=0.01, count=2, use_poll=True, map=self.my_map)
                 # make sure not to deliver any messages if the session isn't ready
                 if self.session_name:
@@ -877,6 +894,8 @@ class AsyncSpreadThreaded(AsyncSpread):
                 time.sleep(0.5)
         print '%s>> IO Thread exiting' % (thr_name)
         self._drop()
+        # set self.io_thread to None?
+        # self.io_thread = None
 
     def loop(self, timeout=None, slice=0.001):
         print 'THREADED loop() called!'
@@ -924,10 +943,6 @@ class SpreadAuthException(SpreadException):
     def __init__(self, errno):
         SpreadException.__init__(self, errno)
         self.type = 'SpreadAuthException' # TODO: clean up
-
-
-
-
 
 logging.getLogger().addHandler(NullLogHandler())
 

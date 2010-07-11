@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from distutils.core import setup
 setup (name = "asyncspread",
-     version = "0.1",
+     version = "0.1.0",
      description = "Asynchronous Spread Client",
      author = "J. Will Pierce",
      author_email = "willp@nuclei.com",

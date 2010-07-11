@@ -372,7 +372,28 @@ class async_chat26(asynchat.async_chat):
             asynchat.async_chat.__init__(self, conn, map)
 
 class AsyncSpread(async_chat26): # was asynchat.async_chat
-    '''Asynchronous client API for Spread 4.x group messaging.'''
+    '''Asynchronous client API for Spread 4.x group messaging written in pure Python.
+    
+    AsyncSpread's features are:
+    
+    * asynchronous client API to Spread 4.x message broker, built using only python standard
+    library modules, including asyncore
+    
+    * non-threaded and threaded support, up to the user's choice
+    
+    * messaging API supporting multicast (one:many) and unicast (one:one) style messaging among clients
+    
+    * flexible API for receiving messages and notifications, based on a SpreadListener class that may be
+    subclassed to override default behavior, or use the supplied GroupCallback listener which lets you
+    easily wire up your methods as callbacks to be invoked when certain Group messages or events arrive.
+    
+    * supports a built-in SpreadPingListener class to support a ping() test of the server, using a special
+    message addressed to one's self, sent through the server and handled automatically (with configurable
+    timeout)
+    
+    * and much more!
+    
+    '''
     def __init__(self, name, host, port,
                  listener=None,
                  membership_notifications=True,

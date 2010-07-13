@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+'''AsyncSpread connection module, contains AsyncSpread and AsyncSpreadThreaded classes'''
 import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback, itertools
 from collections import deque
 from message import *
@@ -23,10 +23,12 @@ Author:  "J. Will Pierce" <willp@nuclei.com>
 
 class NullLogHandler(logging.Handler):
     '''Log null handler for polite logging'''
-    def emit(self, record): pass
+    def emit(self, record):
+        '''do nothing handler'''
+        pass
 
 
-class async_chat26(asynchat.async_chat):
+class AsyncChat26(asynchat.async_chat):
     '''helper to fix for python2.4 asynchat missing a 'map' parameter'''
     def __init__ (self, conn=None, map=None):
         # if python version < 2.6:
@@ -41,7 +43,22 @@ class async_chat26(asynchat.async_chat):
             # otherwise, we defer 100% to the parent class, since it works fine
             asynchat.async_chat.__init__(self, conn, map)
 
-class AsyncSpread(async_chat26): # was asynchat.async_chat
+def _unpack_header(self, payload):
+    '''used for python < 2.5 where the struct module doesn't offer the
+    more optimized struct.Struct class for holding pre-compiled struct formats.'''
+    return struct.unpack(SpreadProto.HEADER_FMT, payload)
+
+def make_unpack_header(self):
+    '''optimization helper to return a method that will unpack spread headers using Struct.unpack.
+    On python 2.5+ it will return a precompiled struct.Struct() object's bound unpack method,
+    and on python 2.4 it returns the local method _unpack_header() instead'''
+    try:
+        precompiled = struct.Struct(SpreadProto.HEADER_FMT)
+        return precompiled.unpack # bound method
+    except: # python <= 2.4 support
+        return _unpack_header
+
+class AsyncSpread(AsyncChat26): # was asynchat.async_chat
     '''Asynchronous client API for Spread 4.x group messaging written in pure Python.
 
     AsyncSpread's features are:
@@ -92,7 +109,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
             self.my_map = map
         else:
             self.my_map = dict()
-        async_chat26.__init__(self, map=self.my_map)
+        AsyncChat26.__init__(self, map=self.my_map)
         self.name, self.host, self.port = (name, host, port)
         self.membership_notifications = membership_notifications
         self.priority_high = priority_high
@@ -132,6 +149,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         return '<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s", dead=%s, shutdown=%s' % (self.__class__, self.name, self.connected, self.host, self.port, self.session_name, self.dead, self.shutdown)
 
     def _do_connect(self):
+        '''perform actual socket connect() to server'''
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         if self.keepalive:
             try:
@@ -143,15 +161,16 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
                 self.logger.warning('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
                 self.keepalive = False
         self.dead = False
-        print 'attempting self.connect() to:',self.host, self.port
+        #print 'attempting self.connect() to:',self.host, self.port
         ret = self.connect((self.host, self.port))
-        print 'CONNECT:', ret
+        #print 'CONNECT:', ret
 
     def start_connect(self, timeout=10):
+        '''invoke this to begin the connection process to the server'''
         if self.connected:
             print 'WARNING: ALREADY CONNECTED!'
             return True
-        print 'start_connect() timeout:', timeout
+        #print 'start_connect() timeout:', timeout
         self._do_connect()
         return self.wait_for_connection(timeout)
 
@@ -159,8 +178,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         '''Spend time in self.poll() until the timeout expires, or we are connected, whichever first.
         Return boolean indicating if we are connected yet.  Or not.'''
         time_end = time.time() + timeout
+        # TODO: check to make sure the connection succeeds too, and that we dont want to shut down
         while self.session_name is None and time.time() < time_end:
-            print 'Waiting for connection...'
+            print 'Waiting for session_name to be set...'
             if self.dead or self.shutdown:
                 return False
             self.poll(timeout/100)
@@ -169,6 +189,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         return self.session_name is not None
 
     def poll(self, timeout=0.001):
+        '''spend time on the socket layer (asyncore.loop), looking for IO, invoking IO handlers'''
         if not self.dead:
             asyncore.loop(timeout=timeout, count=1, use_poll=True, map=self.my_map)
         if self._is_timer():
@@ -176,7 +197,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         return not self.dead
 
     def loop(self, timeout=None, slice=0.1):
-        '''factor out expire_every into a generalized timer that calls up into listener'''
+        '''spend more time than poll() doing IO on the connection'''
         if self.io_active:
             print 'ERROR: using loop() at same time as background IO thread is not valid.'
             raise IOError('Cannot do asyncore IO in two different threads')
@@ -193,28 +214,22 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         '''totally delegated to internal SpreadProto object'''
         self.proto.set_level(level)
 
-    def _unpack_header(self, payload):
-        '''used for python < 2.5 where the struct module doesn't offer the
-        more optimized struct.Struct class for holding pre-compiled struct formats.'''
-        return struct.unpack(SpreadProto.HEADER_FMT, payload)
 
-    def make_unpack_header(self):
-        try:
-            precompiled = struct.Struct(SpreadProto.HEADER_FMT)
-            return precompiled.unpack # bound method
-        except: # python <= 2.4 support
-            return self._unpack_header
 
     def _clear_ibuffer(self):
+        '''clears internal input buffer and buffer offset'''
         self._ibuffer = ''
         self._ibuffer_start = 0
 
     def _reset_timer(self, delay=None):
+        '''clear the local timer and reset it to the next scheduled time, using delay'''
         if delay is None:
             delay = self.timer_interval
         self.timer_next = time.time() + delay
 
     def _is_timer(self):
+        '''method to check the timer and either return True (and reset the timer) or return
+        False if the timer isn't due yet.'''
         now = time.time()
         if now >= self.timer_next:
             self._reset_timer()
@@ -222,6 +237,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         return False
 
     def handle_connect(self):
+        '''invoked by asyncore when connect() returns a successful socket connection to the server'''
         self.mfactory = SpreadMessageFactory()
         self.logger.debug('handle_connect(): got TCP connection to server, sending credentials')
         connect_msg = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
@@ -229,6 +245,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.push(connect_msg)
 
     def handle_close(self):
+        '''invoked by asyncore when the socket is closed from the server side.'''
         self.logger.warning('Connection lost to server: %s:%d' % (self.host, self.port))
         self.dead = True
         self.session_name = None
@@ -237,15 +254,18 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.listener._process_dropped(self)
 
     def handle_error(self):
-        (exc_type, exc_val, tb) = sys.exc_info()
+        '''invoked when an error happens on the socket (unexpected error) or an unhandled
+        exception occurs in an IO handler.'''
+        (exc_type, exc_val, tback) = sys.exc_info()
         self.logger.warning('handle_error(): Got exception: %s' % exc_val)
         self.logger.info('Traceback: ' + traceback.format_exc())
-        self._drop()
         sys.exc_clear()
         self.listener._process_error(self, exc_val)
+        self._drop()
         self.listener._process_dropped(self)
 
     def _drop(self):
+        '''internal function to close and clear all state associated with a connection'''
         self.io_ready.clear()
         self.dead = True
         self.close() # changes self.connected to False, usually
@@ -257,28 +277,36 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.session_name = None
 
     def _send(self, data):
+        '''internal method to abstract the difference between threaded and non-threaded enqueue methods.
+        in non-threaded use, this just invokes the asyncore.dispatcher's push() method, but in threaded usage
+        it actually pushes onto a thread-safe deque instead'''
         self.push(data)
 
     def _dispatch(self, message):
+        '''when a complete SpreadMessage is received, this method will invoke the Listener's appropriate methods to
+        deliver the message according to its type.'''
         listener = self.listener
-        if listener is not None:
-            # Listeners should not throw exceptions here
-            if isinstance(message, DataMessage):
-                listener._process_data(self, message)
-            elif isinstance(message, MembershipMessage):
-                listener._process_membership(self, message)
-            elif isinstance(message, OpaqueMessage):
-                # let's hope this never happens
-                self.logger.critical('Unknown message received (and ignored) as OpaqueMessage: %s' (message))
-            else:
-                # this never happens. assert here
-                assert message, 'Code error! Unexpected type of message: %s' % (type(message))
+        if listener is None:
+            return
+        # Listeners should not throw exceptions here
+        if isinstance(message, DataMessage):
+            listener._process_data(self, message)
+        elif isinstance(message, MembershipMessage):
+            listener._process_membership(self, message)
+        elif isinstance(message, OpaqueMessage):
+            # let's hope this never happens
+            self.logger.critical('Unknown message received (and ignored) as OpaqueMessage: %s' % (message))
+        else:
+            # this never happens. assert here
+            assert message, 'Code error! Unexpected type of message: %s' % (type(message))
 
     def collect_incoming_data(self, data):
         '''Buffer the data'''
         self._ibuffer += data
 
     def found_terminator(self):
+        '''invoked by asyncore.asynchat when the terminating condition has been met, which
+        is after a fixed number of bytes (produced by the protocol state machine) has been read'''
         data = self._ibuffer[self._ibuffer_start:(self._ibuffer_start+self.need_bytes)]
         self._ibuffer_start += self.need_bytes
         if len(self._ibuffer) > 500: # TODO: remove hard coded value here
@@ -288,12 +316,15 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         next_cb(data)
 
     def wait_bytes(self, need_bytes, next_state):
+        '''used by the protocol state machine to indicate that after *need_bytes* have been received,
+        to invoke *next_state* to continue processing.  Every state must set its next_state, using this method.'''
         need_bytes = int(need_bytes) # py 2.4 fixup for struct.unpack()'s longs not satisfying isinstance(int)
         self.need_bytes = need_bytes
         self.next_state = next_state
         self.set_terminator(need_bytes)
 
     def st_auth_read(self, data):
+        '''protocol state: this method handles decoding the length of the authentication string that is to follow'''
         self.logger.debug('STATE: st_auth_read')
         (authlen,) = struct.unpack('b', data)
         if authlen < 0:
@@ -305,12 +336,14 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.wait_bytes(authlen, self.st_auth_process)
 
     def st_auth_process(self, data):
+        '''protocol state: this method parses the authentication methods string, which is a space delimited list
+        usually "NULL " but it may be: "NULL IP" or "IP ".  There is trailing whitespace usually.'''
         self.logger.debug('STATE: st_auth_process')
         methods = data.rstrip().split(' ') # space delimited?
         if 'NULL' not in methods: # TODO: add 'IP' support at some point
             self.logger.critical('Spread server does not accept our NULL authentication. Server permited methods are: "%s"' % (data))
             self._drop()
-            self.listener._process_error(self, SpreadAuthException(-9))
+            self.listener._process_error(self, SpreadAuthException('auth rejected'))
             return
         msg_auth = SpreadProto.AUTH_PKT
         self.wait_bytes(1, self.st_read_session)
@@ -318,6 +351,9 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         return
 
     def st_read_session(self, data):
+        '''protocol state: this method reads the authentication result code, which is a single signed byte
+        and is the value 1 for success or a negative value mapping to some error condition.  if authentication
+        fails, the listener's _process_error() is invoked with a SpreadException as an argument! Neat.'''
         self.logger.debug('STATE: st_read_session')
         (accept,) = struct.unpack('b', data)
         if accept != 1:
@@ -328,18 +364,22 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.wait_bytes(3, self.st_read_version)
 
     def st_read_version(self, data):
+        '''protocol state: this reads the 3 byte version data, and requires that the values are not (-1, -1, -1),
+        which I'm not sure ever happens.'''
         self.logger.debug('STATE: st_read_version')
-        (majorVersion, minorVersion, patchVersion) = struct.unpack('bbb', data)
-        self.logger.info('Server reports it is Spread version: %d.%d.%d' % (majorVersion, minorVersion, patchVersion))
-        version = (majorVersion | minorVersion | patchVersion)
+        (major_version, minor_version, patch_version) = struct.unpack('bbb', data)
+        self.logger.info('Server reports it is Spread version: %d.%d.%d' % (major_version, minor_version, patch_version))
+        version = (major_version | minor_version | patch_version)
         if version == -1: # when does this happen?
             self._drop()
             self.listener._process_error(self, SpreadException(version))
             return
-        self.server_version = (majorVersion, minorVersion, patchVersion)
+        self.server_version = (major_version, minor_version, patch_version)
         self.wait_bytes(1, self.st_read_session_namelen)
 
     def st_read_session_namelen(self, data):
+        '''protocol state: this reads the length of the session name string that the server is
+        assigning to this client's connection.  If the length is -1, then the connection has failed in some way.'''
         self.logger.debug('STATE: st_read_session_namelen')
         (group_len,) = struct.unpack('b', data)
         if group_len == -1:
@@ -349,6 +389,10 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.wait_bytes(group_len, self.st_set_session)
 
     def st_set_session(self, data):
+        '''protocol state: this reads the string for the client's "session_name" for this connection,
+        which is the unique identifier that this client has for itself for the lifetime of this connection.
+        It is usually in the format: '#my_private_name#server_name' where my_private_name is
+        supplied by the client, and server_name is the unique name of this spread daemon.'''
         self.logger.debug('STATE: st_set_session')
         self.session_name = data
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
@@ -358,13 +402,21 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self.wait_bytes(48, self.st_read_header)
 
     def st_read_header(self, data):
+        '''protocol state: this decodes the 48-byte header of every SpreadMessage, extracting the
+        per-message: service type (reliability level), sender name, number of groups this message is
+        addressed to, numeric 16-bit message type as set by the sender application,  and the length of
+        the payload (mesg_len).  If the number of groups is > 0 (usually it is), then the next state reads
+        the length prefixed list of destination groups.  Otherwise, the message payload is read.
+
+        TODO: handle endianness differences properly here.
+        '''
         self.logger.debug('STATE: st_read_header')
         (svc_type, sender, num_groups, mesg_type, mesg_len) = self.unpack_header(data)
         # TODO: add code to flip endianness of svc_type and mesg_type if necessary (independently?)
-        ENDIAN_TEST = 0x80000080
-        endian_wrong = (svc_type & ENDIAN_TEST) == 0
-        svc_type &= ~ENDIAN_TEST
-        mesg_type &= ~ENDIAN_TEST
+        endian_test = 0x80000080
+        endian_wrong = (svc_type & endian_test) == 0
+        svc_type &= ~endian_test
+        mesg_type &= ~endian_test
         mesg_type = mesg_type >> 8
         # trim trailing nulls on sender
         tail_null = sender.find('\x00')
@@ -386,6 +438,12 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self._dispatch(factory_mesg)
 
     def st_read_groups(self, data):
+        '''protocol state: this reads the list of destination groups that this message is addressed to.
+        Note that group strings are fixed-length at 32 byte strings each, so the decoding is
+        straightforward.  The ASCII NULL value is not permitted in group names, and is used as a terminator
+        byte when the group strings are parsed out.  If there is no message body (mesg_len==0) then
+        the message is fully decoded and this method invokes _dispatch() to pass the completed message
+        to the listener.'''
         self.logger.debug('STATE: st_read_groups')
         group_packer = SpreadProto.GROUP_FMTS[self.mfactory.num_groups] # '32s' * len(gname)
         groups_padded = struct.unpack(group_packer, data)
@@ -400,6 +458,8 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self._dispatch(factory_mesg)
 
     def st_read_message(self, data):
+        '''protocol state: this method processes the message payload, and uses _dispatch() to
+        pass the completed message up to the listener.'''
         self.logger.debug('STATE: st_read_message')
         self.msg_count += 1
         factory_mesg = self.mfactory.process_data(data)
@@ -407,14 +467,18 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         self._dispatch(factory_mesg)
 
     def join(self, group):
+        '''join a group, by sending the JOIN request to the server.  If the connection is not up or has failed,
+        this method will raise a SpreadException.'''
         if self.session_name is None:
             self.logger.critical('Not connected to spread. Cannot join group "%s"' % (group))
-            raise SpreadException(100) # not connected
+            raise SpreadException('not connected') # not connected
         join_msg = SpreadProto.protocol_create(SpreadProto.JOIN_PKT, 0, self.session_name, [group], 0)
         self._send(join_msg)
         return True
 
     def leave(self, group):
+        '''leave a group, by sending the LEAVE request to the server.  If the connection is not up or has failed,
+        this method will return False.  Otherwise, it returns True.'''
         if self.session_name is None:
             self.logger.critical('No session established with server... Failed leave() message')
             return False
@@ -423,6 +487,8 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         return True
 
     def disconnect(self):
+        '''gracefully disconnect from the server, by sending a KILL (self) request to the server.  If the connection
+        is not up, or has already been closed, this method returns False.  Otherwise it returns True.'''
         if self.session_name is None:
             return False # is we're not connected, just return False instead of raising an exception
         who = self.session_name
@@ -447,7 +513,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         '''
         if self.session_name is None:
             self.logger.critical('Not connected to spread. Cannot send multicast message to group(s) "%s"' % (groups))
-            raise SpreadException(100)
+            raise SpreadException('no connection')
         #print 'multicast(groups=%s, message=%s, mesg_type=%d, self_discard=%s)' % (groups, message, mesg_type, self_discard)
         data_len = len(message)
         svc_type_pkt = self.proto.get_send_pkt(self_discard)
@@ -510,6 +576,7 @@ class AsyncSpreadThreaded(AsyncSpread):
             self.start_connect()
 
     def _send(self, pkt):
+        '''threaded version of _send() which uses a deque() object as a thread-safe queue'''
         self.out_queue.append(pkt)
 
     def start_io_thread(self):
@@ -531,6 +598,7 @@ class AsyncSpreadThreaded(AsyncSpread):
         return
 
     def start_connect(self, timeout=10):
+        '''initiate the connection process.  returns True/False after the connection is made or the timeout expires'''
         self.do_reconnect = True
         print 'start_connect() timeout:', timeout
         return self.wait_for_connection(timeout)
@@ -556,8 +624,8 @@ class AsyncSpreadThreaded(AsyncSpread):
 
         This logic is insane.  Needs MAJOR help / refactoring.
         '''
-        me = threading.local() # This isn't really used yet
-        me.thr_name = thr_name
+        thread_me = threading.local() # This isn't really used yet
+        thread_me.thr_name = thr_name
         print '%s>> Doing io in do_io()' % (thr_name)
         main_loop = 0
         while not self.shutdown:
@@ -588,14 +656,12 @@ class AsyncSpreadThreaded(AsyncSpread):
         # self.io_thread = None
 
     def loop(self, timeout=None, slice=0.001):
+        '''not to be invoked....'''
         print 'THREADED loop() called!'
         time.sleep(timeout)  # just sleep in this case? or raise exception?
 
     def poll(self, timeout=0.001):
+        '''not to be invoked....'''
         pass#time.sleep(timeout)
 
 logging.getLogger().addHandler(NullLogHandler())
-
-if __name__ == '__main__':
-    # do some unit testing here... not easy to imagine without a server to talk to
-    pass

@@ -5,7 +5,7 @@ from message import *
 from services import *
 from listener import *
 
-__version__ = '0.1.2' # used by setup.py
+__version__ = '0.1.3a' # used by setup.py
 
 '''This code is released for use under the Gnu Public License V3 (GPLv3).
 
@@ -160,7 +160,7 @@ class AsyncSpread(async_chat26): # was asynchat.async_chat
         time_end = time.time() + timeout
         while self.session_name is None and time.time() < time_end:
             print 'Waiting for connection...'
-            if self.dead:
+            if self.dead or self.shutdown:
                 return False
             self.poll(timeout/100)
             time.sleep(sleep_delay)

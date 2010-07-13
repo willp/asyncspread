@@ -1,9 +1,9 @@
 #!/usr/bin/python2.4
 import time, sys, logging
 sys.path.append('.')
-import asyncspread.connection as conn
-import asyncspread.listeners as listen
-import asyncspread.services as svc
+from asyncspread.connection import AsyncSpread, AsyncSpreadThreaded
+from asyncspread.listeners import SpreadListener, SpreadPingListener, CallbackListener, GroupCallback
+from asyncspread.services import ServiceTypes
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
@@ -14,7 +14,7 @@ def setup_logging(level=logging.INFO):
 
 setup_logging(logging.INFO)
 
-class MyListener(listen.SpreadPingListener):
+class MyListener(SpreadPingListener):
     def handle_ping(self, success, elapsed):
         print '***808 PONG:  Success:', success, ' Elapsed:', elapsed
 
@@ -42,8 +42,8 @@ def split_cb(conn, group, changes, old_membership, new_membership):
     print 'Client Network Split CB: conn:', conn, 'group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
 
 mylistener = MyListener()
-mylistener2 = listen.CallbackListener(cb_conn=conn_cb, cb_error=err_cb, cb_dropped=drop_cb)
-mylistener2.set_group_cb('gr1', listen.GroupCallback(cb_data=data_cb,
+mylistener2 = CallbackListener(cb_conn=conn_cb, cb_error=err_cb, cb_dropped=drop_cb)
+mylistener2.set_group_cb('gr1', GroupCallback(cb_data=data_cb,
                                     cb_start=start_end_cb, cb_end=start_end_cb,
                                     cb_join=join_leave_cb, cb_leave=join_leave_cb,
                                     cb_network=split_cb))
@@ -56,9 +56,9 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = conn.AsyncSpreadThreaded(myname, host, port, listener=mylistener2, start_connect=True)
+sp1 = AsyncSpreadThreaded(myname, host, port, listener=mylistener2, start_connect=True)
 print 'Connecting to %s:%d' % (host, port)
-sp1.set_level(svc.ServiceTypes.UNRELIABLE_MESS)
+sp1.set_level(ServiceTypes.UNRELIABLE_MESS)
 ret = sp1.connected
 print 'Connected?', ret
 if ret:

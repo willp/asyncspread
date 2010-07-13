@@ -1,4 +1,4 @@
-from services import *
+from services import ServiceTypes
 
 class SpreadMessage(object):
     def _set_data(self, data):

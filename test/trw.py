@@ -1,7 +1,9 @@
 #!/usr/bin/python2.4
 import time, sys, logging
 sys.path.append('.')
-from asyncspread import asyncspread
+import asyncspread.connection as conn
+import asyncspread.listeners as listen
+#from asyncspread import asyncspread
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
@@ -19,7 +21,7 @@ myname1 = 'trw1-%05d' % (int(time.time()*100) % 1000)
 myname2 = 'trw2-%05d' % (int(time.time()*100) % 1000)
 print 'I am', myname1, 'and:', myname2
 
-class MyListener(asyncspread.SpreadPingListener):
+class MyListener(listen.SpreadPingListener):
     def handle_data(self, conn, message):
         print 'Got message:', message, 'From connection:', conn
     def handle_dropped(self, conn):
@@ -36,10 +38,10 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = asyncspread.AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=True, map=map)
+sp1 = conn.AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=True, map=map)
 print 'SP1 is:', sp1
 sp1.start_connect()
-sp2 = asyncspread.AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=True, map=map)
+sp2 = conn.AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=True, map=map)
 sp2.start_connect()
 for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ', ''):
     sp1.join(g)

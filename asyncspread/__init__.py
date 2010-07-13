@@ -1,1 +1,1 @@
-__all__ = [ 'asyncspread', 'services', 'message', 'listener' ]
+__all__ = [ 'connection', 'services', 'message', 'listeners' ]

@@ -1,7 +1,9 @@
 #!/usr/bin/python2.4
 import time, sys, logging, threading, random
 sys.path.append('.')
-from asyncspread import *
+import asyncspread.connection as conn
+import asyncspread.listener as listen
+import asyncspread.services as svc
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
@@ -13,7 +15,7 @@ def setup_logging(level=logging.INFO):
 
 setup_logging(logging.INFO)
 
-class MyListener(asyncspread.SpreadPingListener):
+class MyListener(listen.SpreadPingListener):
     def handle_ping(self, success, elapsed):
         print '***808 PONG:  Success:', success, ' Elapsed:', elapsed
 
@@ -42,9 +44,9 @@ def join_leave_cb(conn, group, member, cause):
 def split_cb(conn, group, changes, old_membership, new_membership):
     print 'Client Network Split CB: conn:', conn, 'group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
 
-listener = MyListener()
-listener2 = asyncspread.CallbackListener(cb_conn=conn_cb, cb_error=err_cb, cb_dropped=drop_cb)
-listener2.set_group_cb('gr1', asyncspread.GroupCallback(cb_data=data_cb,
+mylistener = MyListener()
+mylistener2 = listen.CallbackListener(cb_conn=conn_cb, cb_error=err_cb, cb_dropped=drop_cb)
+mylistener2.set_group_cb('gr1', listen.GroupCallback(cb_data=data_cb,
                                     cb_start=start_end_cb, cb_end=start_end_cb,
                                     cb_join=join_leave_cb, cb_leave=join_leave_cb,
                                     cb_network=split_cb))
@@ -57,9 +59,9 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = asyncspread.AsyncSpreadThreaded(myname, host, port, listener=listener2, start_connect=True)
+sp1 = conn.AsyncSpreadThreaded(myname, host, port, listener=mylistener2, start_connect=True)
 print 'Connecting to %s:%d' % (host, port)
-sp1.set_level(services.ServiceTypes.UNRELIABLE_MESS)
+sp1.set_level(svc.ServiceTypes.UNRELIABLE_MESS)
 sp1.start_connect()
 time.sleep(2)
 ret = sp1.connected
@@ -83,7 +85,7 @@ for i in xrange(1, 16):
     else:
         sp1.multicast(groups, 'Test message number %d' % (i), ((i*100) % 0xffff), self_discard=False)
 #    if i % 10 == 9:
-#        listener.ping(sp1, ping_cb, 5)
+#        mylistener.ping(sp1, ping_cb, 5)
 #    print 'sent off my messages for iteration %d' % (i)
     if i % 10 == 5:
         sp1.leave('gr2')

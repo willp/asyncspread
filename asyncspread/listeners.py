@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from message import *
-from services import *
+#from services import *
 import time
 
 class SpreadListener(object):

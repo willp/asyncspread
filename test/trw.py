@@ -3,13 +3,12 @@ import time, sys, logging
 sys.path.append('.')
 import asyncspread.connection as conn
 import asyncspread.listeners as listen
-#from asyncspread import asyncspread
+
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
     logger.setLevel(level)
     ch = logging.StreamHandler()
-    #ch.setLevel(level)
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
@@ -29,7 +28,6 @@ class MyListener(listen.SpreadPingListener):
         print 'Setting reconnect to True.'
         conn.reconnect = True
 
-#listener = asyncspread.SpreadPingListener()
 map=dict()
 listener = MyListener()
 host = 'localhost'
@@ -40,9 +38,7 @@ if len(sys.argv) > 2:
     port = int(sys.argv[2])
 sp1 = conn.AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=True, map=map)
 print 'SP1 is:', sp1
-sp1.start_connect()
 sp2 = conn.AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=True, map=map)
-sp2.start_connect()
 for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ', ''):
     sp1.join(g)
     sp2.join(g)

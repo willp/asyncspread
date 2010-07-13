@@ -5,7 +5,7 @@ from asyncspread import *
 setup (name = 'asyncspread',
     packages = ['asyncspread'],
     version = asyncspread.__version__,
-    description = 'Asynchronous Spread Client',
+    description = 'Asynchronous Spread 4.x Client for distributed computing, multicast messaging and fault tolerant clustered application development',
     author = 'J. Will Pierce',
     author_email = 'willp@nuclei.com',
     license = 'GNU Lesser General Public License 3 or later',

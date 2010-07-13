@@ -1,15 +1,14 @@
 #!/usr/bin/python2.4
-import time, sys, logging, threading, random
+import time, sys, logging
 sys.path.append('.')
 import asyncspread.connection as conn
-import asyncspread.listener as listen
+import asyncspread.listeners as listen
 import asyncspread.services as svc
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
     logger.setLevel(level)
     ch = logging.StreamHandler()
-    #ch.setLevel(level)
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
@@ -31,8 +30,6 @@ def drop_cb(listener, conn):
     print 'Client > DROPPED < CB:  conn:', conn
     print 'Setting reconnect flag'
     conn.do_reconnect = True
-    #ret = conn.start_connect()
-    #conn.start_io_thread()
 def err_cb(listener, conn, exc):
     print 'Client > ERROR <  CB: conn:', conn, 'Exception:', exc
 def data_cb(conn, message):
@@ -62,8 +59,6 @@ if len(sys.argv) > 2:
 sp1 = conn.AsyncSpreadThreaded(myname, host, port, listener=mylistener2, start_connect=True)
 print 'Connecting to %s:%d' % (host, port)
 sp1.set_level(svc.ServiceTypes.UNRELIABLE_MESS)
-sp1.start_connect()
-time.sleep(2)
 ret = sp1.connected
 print 'Connected?', ret
 if ret:
@@ -84,9 +79,6 @@ for i in xrange(1, 16):
         sp1.multicast(groups, '', ((i*101) % 65535), self_discard=False)
     else:
         sp1.multicast(groups, 'Test message number %d' % (i), ((i*100) % 0xffff), self_discard=False)
-#    if i % 10 == 9:
-#        mylistener.ping(sp1, ping_cb, 5)
-#    print 'sent off my messages for iteration %d' % (i)
     if i % 10 == 5:
         sp1.leave('gr2')
         sp1.join('gr1')
@@ -96,16 +88,13 @@ for i in xrange(1, 16):
         sp1.join('gr2')
         sp1.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff, self_discard=False)
     sp1.multicast(['gr1'], "A" * 90, 0, self_discard=False) # send big message
-    #sp1.loop(1)
     time.sleep(1)
     print
 print 'Entering big long lasting loop...'
-time.sleep(20)
-#sp1.loop(60000)
+time.sleep(10)
 print 'Done with big loop..'
 sp1.leave('gr18')
 sp1.disconnect()
-#sp1.loop(10)
 print 'about to exit...'
 time.sleep(2)
 sys.exit(0)

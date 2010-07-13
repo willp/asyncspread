@@ -3,7 +3,7 @@ import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, 
 from collections import deque
 from message import *
 from services import *
-from listener import *
+from listeners import *
 
 __version__ = '0.1.3a' # used by setup.py
 

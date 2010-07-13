@@ -27,6 +27,8 @@ class NullLogHandler(logging.Handler):
         '''do nothing handler'''
         pass
 
+# This happens at import-time.  I think it's polite.
+logging.getLogger().addHandler(NullLogHandler())
 
 class AsyncChat26(asynchat.async_chat):
     '''helper to fix for python2.4 asynchat missing a 'map' parameter'''
@@ -43,12 +45,12 @@ class AsyncChat26(asynchat.async_chat):
             # otherwise, we defer 100% to the parent class, since it works fine
             asynchat.async_chat.__init__(self, conn, map)
 
-def _unpack_header(self, payload):
+def _unpack_header(payload):
     '''used for python < 2.5 where the struct module doesn't offer the
     more optimized struct.Struct class for holding pre-compiled struct formats.'''
     return struct.unpack(SpreadProto.HEADER_FMT, payload)
 
-def make_unpack_header(self):
+def make_unpack_header():
     '''optimization helper to return a method that will unpack spread headers using Struct.unpack.
     On python 2.5+ it will return a precompiled struct.Struct() object's bound unpack method,
     and on python 2.4 it returns the local method _unpack_header() instead'''
@@ -120,7 +122,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.keepalive_idle = 10 # every 10 seconds of idleness, send a keepalive (empty PSH/ACK)
         self.keepalive_maxdrop = 6 # one minute
         # initialize some basics
-        self.unpack_header = self.make_unpack_header()
+        self.unpack_header = make_unpack_header()
         self.logger = logging.getLogger()
         self.proto = SpreadProto()
         self.mfactory = None
@@ -663,5 +665,3 @@ class AsyncSpreadThreaded(AsyncSpread):
     def poll(self, timeout=0.001):
         '''not to be invoked....'''
         pass#time.sleep(timeout)
-
-logging.getLogger().addHandler(NullLogHandler())

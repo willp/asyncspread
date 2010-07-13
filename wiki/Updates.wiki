@@ -2,6 +2,13 @@
 
 = Latest News =
 
+=== July 12, 2010 ===
+
+I'm doing more file reorganization tonight.  asyncspread.py is now connection.py, and I'm rejiggering the test/ scripts so they use the new names.  I'll probably miss a couple spots here or there.  We shall see.
+
+
+
+
 === July 11, 2010 ===
 
 Still have lots of refactoring to do on the IO event loop and on the connection state tracking, but I took a side trip down the package-building rabbit-hole and made my first {{{ setup.py }}} script.  Again, I'm amazed at python's simplicity.  With just 8 lines of code, and technically just one import and one method call, I have a functional setup script.  I used it to build both a tarball of the code, as well as an RPM!  I wouldn't install the RPM on a production system, there's just way too much changing at the moment.  But I took the liberty of uploading the first preview release (*very* alpha!) of the asyncspread code as asyncspread-0.1.0.tar.gz in the Downloads tab of this google code project.  

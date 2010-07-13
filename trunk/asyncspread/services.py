@@ -61,14 +61,15 @@ class SpreadProto(object):
         self.send_pkt_selfdisc = struct.pack('!I', default_type | ServiceTypes.SELF_DISCARD)
 
     @staticmethod
-    def protocol_create(svcType, mesgtype, session_name, group_names, data_len=0):
-        #print 'protocol_create(len(svctype)=%d, mesgtype=%s, session_name=%s, group_names=%s, data_len=%d)' % (len(svcType), mesgtype, session_name, group_names, data_len)
-        mesgtype_str = struct.pack('<I', (mesgtype & 0xffff) << 8)
-        msg_hdr = struct.pack('>32sI4sI', session_name, len(group_names), mesgtype_str, data_len)
+    def protocol_create(service_type, mesg_type, session_name, group_names, data_len=0):
+        #print 'protocol_create(len(service_type)=%d, mesg_type=%s, session_name=%s, group_names=%s, data_len=%d)' % (len(service_type),
+        #       mesg_type, session_name, group_names, data_len)
+        mesg_type_str = struct.pack('<I', (mesg_type & 0xffff) << 8)
+        msg_hdr = struct.pack('>32sI4sI', session_name, len(group_names), mesg_type_str, data_len)
         grp_tag  = SpreadProto.GROUP_FMTS[len(group_names)] # '32s' * len(gname)
         grp_hdr = struct.pack(grp_tag, *group_names)
-        hdr = ''.join((svcType, msg_hdr, grp_hdr))
-        return hdr
+        header = ''.join((service_type, msg_hdr, grp_hdr))
+        return header
 
     @staticmethod
     def protocol_connect(my_name, membership_notifications=True, priority_high=False):

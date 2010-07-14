@@ -7,9 +7,9 @@
 I'm attacking the event loop API now, to make the threaded and non-threaded usage more similar.  This looks a little easier than refactoring the connection-state flag variables, and is probably a prerequisite to getting it cleaned up anyhow.
 
 Changes:
-* renamed loop() to run() but borrowed the asyncore.loop() parameter names: timeout and count.  When count is not specified (set to {{{ None }}} by default), then run() becomes an infinite loop.
-* killed io_active, which also eliminated the check that run() would be called in the threaded version... which isn't a problem after all because run() is reimplemented in the threaded class.
-* removed threaded version of poll(), now threaded class uses the inherited poll() method
+  * renamed loop() to run() but borrowed the asyncore.loop() parameter names: timeout and count.  When count is not specified (set to {{{ None }}} by default), then run() becomes an infinite loop.
+  * killed io_active, which also eliminated the check that run() would be called in the threaded version... which isn't a problem after all because run() is reimplemented in the threaded class.
+  * removed threaded version of poll(), now threaded class uses the inherited poll() method
 
 
 === July 12, 2010 ===

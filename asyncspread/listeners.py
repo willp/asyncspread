@@ -1,9 +1,12 @@
-#!/usr/bin/env python
+'''Spread Listeners are implemented here'''
 from message import *
-#from services import *
 import time
 
 class SpreadListener(object):
+    '''Base generic SpreadListener class which implements the core functionality of
+    processing membership notifications, providing an interface to query them, and
+    stub methods for the AsyncSpread classes to invoke on certain events, like receiving
+    messages, membership notifications, connection failures, and connection success.'''
     def __init__(self):
         self._clear_groups()
 
@@ -160,7 +163,7 @@ class SpreadPingListener(SpreadListener):
         timeouts = []
         now = time.time()
         for ping_id, cb_items in self.ping_callbacks.iteritems():
-            (cb, time_sent, timeout) = cb_items
+            (timer_cb, time_sent, timeout) = cb_items
             expire = time_sent + timeout
             if now >= expire:
                 #print 'EXPIRING ping id %d because now %.4f is > expire %.4f' % (ping_id, now, expire)

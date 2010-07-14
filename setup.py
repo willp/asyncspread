@@ -1,17 +1,19 @@
 #!/usr/bin/env python
 from distutils.core import setup
-from asyncspread import *
+import asyncspread
+from asyncspread.connection import AsyncSpread
 
 setup (name = 'asyncspread',
     packages = ['asyncspread'],
     version = asyncspread.__version__,
-    description = 'Asynchronous Spread 4.x Client for distributed computing, multicast messaging and fault tolerant clustered application development',
+    description = 'Asynchronous Spread 4.x Client library for distributed computing, '
+    'multicast messaging and fault tolerant clustered application development.',
     author = 'J. Will Pierce',
     author_email = 'willp@nuclei.com',
     license = 'GNU Lesser General Public License 3 or later',
     platforms=['any'],
     requires=['Python(>=2.4, <3.0)'],
-    long_description = asyncspread.AsyncSpread.__doc__,
+    long_description = AsyncSpread.__doc__,
     url = 'http://http://code.google.com/p/asyncspread/',
     # may change to a wiki page for downloading the latest version:
     download_url='http://code.google.com/p/asyncspread/downloads/list',

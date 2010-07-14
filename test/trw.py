@@ -36,9 +36,11 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=True, map=map)
+sp1 = AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=False, map=map)
 print 'SP1 is:', sp1
-sp2 = AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=True, map=map)
+sp2 = AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=False, map=map)
+sp1.start_connect()
+sp2.start_connect()
 for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ', ''):
     sp1.join(g)
     sp2.join(g)
@@ -47,11 +49,11 @@ while sp1.connected or sp2.connected:
     loop += 1
     print 'client top of loop'
     sp1.multicast(['gr1', 'AZ'], 'FIRST my multicast num %d' % (loop), 0, self_discard=False)
-    sp2.multicast(['gr1', 'AZ'], 'SECOND connection: multicast num %d' % (loop), 0, self_discard=False)
+    sp2.multicast(['gr2', 'AZ'], 'SECOND connection: multicast num %d' % (loop), 0, self_discard=False)
     listener.ping(sp1, ping_response)
     listener.ping(sp2, ping_response)
-    time.sleep(1)
-    if loop > 10:
+    time.sleep(0.1)
+    if loop > 50:
         sp1.disconnect()
         sp2.disconnect()
 time.sleep(3)

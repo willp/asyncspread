@@ -33,11 +33,11 @@ def drop_cb(listener, conn):
 def err_cb(listener, conn, exc):
     print 'Client > ERROR <  CB: conn:', conn, 'Exception:', exc
 def data_cb(conn, message):
-    print 'Client data CB:  conn:', conn, 'message length:', len(message.data)
+    print 'Client data CB, mesg len:', len(message.data), 'sender:', message.sender, 'groups:', message.groups
 def start_end_cb(conn, group, membership):
     print 'Client start/end CB:  conn:', conn, 'group:', group, 'membership:', membership
 def join_leave_cb(conn, group, member, cause):
-    print 'Client start/end CB:  conn:', conn, 'group:', group, 'member:', member, 'cause:', cause
+    print 'Client join/leave CB:  conn:', conn, 'group:', group, 'member:', member, 'cause:', cause
 def split_cb(conn, group, changes, old_membership, new_membership):
     print 'Client Network Split CB: conn:', conn, 'group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
 
@@ -64,11 +64,10 @@ print 'Connected?', ret
 if ret:
     print 'my private session name is:', sp1.session_name
     sp1.start_io_thread()
-for g in ('gr1', 'group2', 'gr2', 'gr5'):
+for g in ('gr1', 'group2', 'gr2', 'gr5', 'AZ'):
     sp1.join(g)
 
-sp1.loop(1)
-for i in xrange(1, 16):
+for i in xrange(1, 50):
     if sp1.dead:
         break
     groups = ['gr1']
@@ -88,12 +87,12 @@ for i in xrange(1, 16):
         sp1.join('gr2')
         sp1.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff, self_discard=False)
     sp1.multicast(['gr1'], "A" * 90, 0, self_discard=False) # send big message
-    time.sleep(1)
-    print
+    time.sleep(0.1)
 print 'Entering big long lasting loop...'
-time.sleep(10)
+time.sleep(30)
 print 'Done with big loop..'
 sp1.leave('gr18')
+print 'About to disconnect...'
 sp1.disconnect()
 print 'about to exit...'
 time.sleep(2)

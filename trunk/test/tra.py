@@ -33,9 +33,9 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = AsyncSpread(myname1, host, port, listener=listener, start_connect=True, map=map)
+sp1 = AsyncSpread(myname1, host, port, listener=listener, start_connect=False, map=map)
 print 'SP1 is:', sp1
-sp2 = AsyncSpread(myname2, host, port, listener=listener, start_connect=True, map=map)
+sp2 = AsyncSpread(myname2, host, port, listener=listener, start_connect=False, map=map)
 sp1.start_connect()
 sp2.start_connect()
 print 'My map:', map
@@ -51,9 +51,9 @@ while sp1.connected or sp2.connected:
     sp2.multicast(['gr2', 'AZ'], 'SECOND connection: multicast num %d' % (loop), 0, self_discard=False)
     listener.ping(sp1, ping_response)
     listener.ping(sp2, ping_response)
-    sp1.loop(1)
-    if loop > 500:
+    sp1.run(1)
+    if loop > 50:
         sp1.disconnect()
-        sp1.loop(100)
+        sp1.run(100)
         sp2.disconnect()
-        sp2.loop(100)
+        sp2.run(100)

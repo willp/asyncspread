@@ -2,6 +2,22 @@
 
 = Latest News =
 
+
+=== July 14, 2010 ===
+
+I sketched out the pieces and decided to remove the auto-reconnect feature for now, until I can get the threaded implementation fully sorted out.  Reconnect is still an option, but it will have to be triggered by user code, not by the client itself.  That's probably for the best, anyways.  It's also almost trivial, so it's not a huge imposition.  Plus most clients will likely want to do something slightly unique in order to reconnect (special penalty logic, failover, etc).
+
+I think the io_ready threading.Event object should be renamed to 'session_up', and I need a new 'session.shutdown' Event object to prevent a thread-safety problem in the disconnect() method.  Looking at the truth table of session_up and session_shutdown, the various combinations make perfect sense and map to specific states or state transitions for the actual connection.  Seeing no invalid states gives me more confidence that these primitives are a good fit to what I need.
+
+. . .
+
+This strategy is paying off.  I've been able to remove the io_ready member, and replace it entirely with session_up (both as a threading.Event object.  Instead of testing against the value of session_name (being non-None), I've switched more tests against session_up.isSet() which is clearer.  And... just finished changing *all* the tests to use the threading.Event isSet() check on self.session_up, so the test is thread friendly everywhere.  I should probably make this an internal method, _is_up() or something to reduce the duplication.
+
+Another change I'm going to make now is to start up the IO thread in the AsyncSpreadThreaded constructor, and just eliminate the possibility that the IO thread has not yet been started when the rest of the code executes.  I still have to have an exit condition, which needs to be separate from the disconnect() method's session_shutdown (that I haven't yet put in).  Anyhow, the thread startup logic (locking and rechecking later) is superfluous.
+
+
+
+
 === July 13, 2010 ===
 
 I'm attacking the event loop API now, to make the threaded and non-threaded usage more similar.  This looks a little easier than refactoring the connection-state flag variables, and is probably a prerequisite to getting it cleaned up anyhow.

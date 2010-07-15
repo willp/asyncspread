@@ -26,7 +26,7 @@ class MyListener(SpreadPingListener):
     def handle_dropped(self, conn):
         print 'DROPPED CONNECTION! Conn:', conn
         print 'Setting reconnect to True.'
-        conn.reconnect = True
+        #conn.reconnect = True
 
 map=dict()
 listener = MyListener()
@@ -38,14 +38,14 @@ if len(sys.argv) > 2:
     port = int(sys.argv[2])
 sp1 = AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=False, map=map)
 print 'SP1 is:', sp1
-sp2 = AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=False, map=map)
-sp1.start_connect()
-sp2.start_connect()
+sp2 = AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=True, map=map)
+sp1.start_connect(5)
+sp2.start_connect(5)
 for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ', ''):
     sp1.join(g)
     sp2.join(g)
 loop=0
-while sp1.connected or sp2.connected:
+while sp1.connected and sp2.connected:
     loop += 1
     print 'client top of loop'
     sp1.multicast(['gr1', 'AZ'], 'FIRST my multicast num %d' % (loop), 0, self_discard=False)
@@ -56,4 +56,4 @@ while sp1.connected or sp2.connected:
     if loop > 50:
         sp1.disconnect()
         sp2.disconnect()
-time.sleep(3)
+time.sleep(1)

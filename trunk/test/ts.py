@@ -63,7 +63,6 @@ ret = sp1.connected
 print 'Connected?', ret
 if ret:
     print 'my private session name is:', sp1.session_name
-    sp1.start_io_thread()
 for g in ('gr1', 'group2', 'gr2', 'gr5', 'AZ'):
     sp1.join(g)
 

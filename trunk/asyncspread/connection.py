@@ -135,15 +135,13 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         # timer interval and initialization
         self.timer_interval = timer_interval
         self._reset_timer()
-        # more settings (is conn dead?)
-        self.dead = False
         # state machine for protocol processing uses these:
         self.need_bytes = 0
         self.next_state = None
+        # more settings (is conn dead?)
+        self.dead = False
         # new events for threaded signalling:
         self.session_up = threading.Event()
-        self.session_shutdown = threading.Event()
-        self.session_shutdown.set() # want shutdown
         # more connection state, reconnect flag:
         self.do_restart = threading.Event()
         # more connection state, want shutdown:
@@ -179,7 +177,6 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         '''invoke this to begin the connection process to the server'''
         if self.connected:
             return True
-        self.session_shutdown.clear()
         self._do_connect()
         return self.wait_for_connection(timeout)
 
@@ -489,6 +486,9 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self._send(leave_msg)
         return True
 
+    def _do_disconnect(self):
+        self._drop() # non-threaded action here can touch the socket
+
     def disconnect(self):
         '''gracefully disconnect from the server, by sending a KILL (self) request to the server.  If the connection
         is not up, or has already been closed, this method returns False.  Otherwise it returns True.'''
@@ -497,9 +497,8 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         who = self.session_name
         disco_msg = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
         self._send(disco_msg)
-        self.session_shutdown.set()
         self.shutdown = True
-        self._drop() # problematic for threaded invocation
+        self._do_disconnect()
         return True
 
     def multicast(self, groups, message, mesg_type, self_discard=True):
@@ -647,3 +646,14 @@ class AsyncSpreadThreaded(AsyncSpread):
         self._drop()
         # set self.io_thread to None?
         # self.io_thread = None
+
+    def _do_disconnect(self):
+        '''invoked by threaded version from inside disconnect() by a user thread,
+        i.e. NOT the IO thread.
+
+        since the self.shutdown bool flag is set in disconnect(), this method doesn't have to
+        do anything, since that will trigger the do_io() loop to terminate, and self._drop() will
+        then be called.
+        '''
+        pass
+

@@ -295,7 +295,7 @@ class CallbackListener(SpreadListener):
         self.set_group_cb(group, GroupCallback(cb_start=done))
         conn.join(group)
         while time.time() < expire_time and not joined:
-            conn.loop(1)
+            conn.loop(1) # TODO: broken! fixme! doesn't work with threaded asyncspread
             print 'waiting for join to group "%s"' % (group)
             time.sleep(0.1)
         return joined

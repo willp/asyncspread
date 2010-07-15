@@ -51,9 +51,12 @@ while sp1.connected or sp2.connected:
     sp2.multicast(['gr2', 'AZ'], 'SECOND connection: multicast num %d' % (loop), 0, self_discard=False)
     listener.ping(sp1, ping_response)
     listener.ping(sp2, ping_response)
-    sp1.run(1)
-    if loop > 50:
+    sp1.run(timeout=1, count=1)
+    if loop > 5000:
+        print 'disconnecting sp1'
         sp1.disconnect()
         sp1.run(100)
+        print 'disconnecting sp2'
         sp2.disconnect()
         sp2.run(100)
+        print 'ought to be disconnected now...'

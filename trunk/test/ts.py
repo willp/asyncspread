@@ -89,7 +89,7 @@ for i in xrange(1, 50):
     sp1.multicast(['gr1'], "A" * 90, 0, self_discard=False) # send big message
     time.sleep(0.1)
 print 'Entering big long lasting loop...'
-time.sleep(30)
+time.sleep(10)
 print 'Done with big loop..'
 sp1.leave('gr18')
 print 'About to disconnect...'

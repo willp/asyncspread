@@ -15,8 +15,11 @@ This strategy is paying off.  I've been able to remove the io_ready member, and 
 
 Another change I'm going to make now is to start up the IO thread in the AsyncSpreadThreaded constructor, and just eliminate the possibility that the IO thread has not yet been started when the rest of the code executes.  I still have to have an exit condition, which needs to be separate from the disconnect() method's session_shutdown (that I haven't yet put in).  Anyhow, the thread startup logic (locking and rechecking later) is superfluous.
 
+. . .
 
+Now I'm changing the self.do_restart to *also* be a threading.Event() so the IO thread doesn't have to sit in a fairly tight polling loop to get connected promptly.
 
+There is finally light at the end of this tunnel.
 
 === July 13, 2010 ===
 

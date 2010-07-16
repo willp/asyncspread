@@ -2,7 +2,6 @@
 
 = Latest News =
 
-
 === July 14, 2010 ===
 
 I sketched out the pieces and decided to remove the auto-reconnect feature for now, until I can get the threaded implementation fully sorted out.  Reconnect is still an option, but it will have to be triggered by user code, not by the client itself.  That's probably for the best, anyways.  It's also almost trivial, so it's not a huge imposition.  Plus most clients will likely want to do something slightly unique in order to reconnect (special penalty logic, failover, etc).

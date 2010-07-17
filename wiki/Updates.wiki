@@ -2,6 +2,34 @@
 
 = Latest News =
 
+=== July 17, 2010 ===
+
+After a bout of food poisoning and a minor earthquake in Washington, DC, and a long work-week, I'm back on the code.  I took some time to look at all the junky print statements that were cluttering up the code, and went through and did a big cleanup to replace all the junk I want to keep with calls to the standard logging module's debug/info/warning/critical() methods.  I still have many print statements left, but they only will live while I continue to debug and restructure the code while I make the threaded version work.
+
+In fixing up the logging, I also put in try/except handling around _all_ the user callbacks and included a logged error message with the exception at critical() level, and a full traceback logged to info() level.  This should help _immensely_ in troubleshooting user applications.  I was stymied myself several times, wondering where my test code had exploded, and got frustrated enough to comb through the code and pick out every callback invocation and every try/except to instrument the except clause with this traceback logging code.  Ahh, how nice to see actual line numbers and lines of code where the real problem happened...  So much better, and elegant to have it sit on top of standard logging.
+
+Another change I made was to stick thread safety into the SpreadPingListener class.  I only realized today that threaded users of the ping listener would potentially have multiple threads entering the ping() method, which would be terribly confusing if two threads got the same ping ID.  It wouldn't be pretty.  So, a single threading.Lock() object and about 20 lines of code later, I think the SpreadPingListener class is now thread-safe.  At least, if it has any problems, I don't think it will explode now.
+
+Making the threaded version work has revealed a lot of issues that I'm working on.  I've come to understand that the  public facing methods need to do less work individually, and delegate some work to helper methods for doing the IO or waiting for the IO thread to do some work.
+
+The run() method was on the chopping block, but then I realized that the GroupCallbackListener class's method join_with_wait() needed to either dip into the non-threaded class's wrapper to asyncore.loop, or just implement a sleep() for the threaded version.  This mapped directly into an internal _do_poll() method which puts the two different behaviors in each class.  The run() method is now completely public-facing, and is safe to invoke from user-code (but not in a user callback).
+
+The two situations which are both deadly are call-stack related:
+  * Scenario One:  a non-threaded user handler invokes the main run() method, which then does more asyncore.loop() which then invokes the handler again, and it continues until a recusion overflow exception is thrown.  And thrown.  And thrown.
+  * Scenario Two: a users' 'dropped connection' handler is invoked in a threaded context by the IO Thread, and the user code (running inside the IO thread) does something stupid, like sleep() or worse, wait_for_connection() which blocks on an Event() object, that is never set() because the IO Thread is doing nothing now.
+
+Both scenarios are situations where the public-facing API has to work when it's invoked from two different contexts: in non-threaded code it is between main application code versus handler-code callbacks, and in threaded code it is between user-thread execution and handler callback execution within the IO thread.
+
+I found that I could easily detect whether a public-facing method was being invoked by a handler callback in the threaded version by testing threading.currentThread() to see if it is the same object as self.io_thread (saved when the IO thread is made at constructor time.)  This was payoff from choosing to always instantiate the IO thread in the threaded constructor, because now I can count on self.io_thread being available to test against.
+
+It looks like I need to implement nearly identical testing in both non-threaded and threaded versions, to check the calling context within the public-facing methods, and avoid dipping back into the IO loop or doing unsafe blocking operations when the caller is executing within a callback handler (i.e. when it is a recursive call, or a call from within the IO thread itself).
+
+I'm a little worried that this is going to make the code really ugly.  I'm trying not to get too fancy with it, so the obvious solution is to code an _is_callback_context() method that both versions implement, with different tests, for the public-facing methods to use to test before doing unsafe operations.  One would test thread object identity and the other would check a flag that is set and unset on entering/leaving the handler (or on entering/leaving asyncore.loop() even).
+
+I've learned one thing in this process: writing a client library that works as a non-threaded AND threaded implementation is challenging.  I'm finding that I have to make a stronger separation between user-facing calls and internal calls.  I don't see any "magic bullet" that will make this easier, other than to lean heavily on overridden methods that each version implements differently, and ensure I have factored out all those behaviors so the overlying logic is still clean.
+
+At least this _is_context_callback() method (acting kind of like a context manager) is generalizable and covers both cases.  It reflects the truth that this API is not fully reentrant.
+
 === July 14, 2010 ===
 
 I sketched out the pieces and decided to remove the auto-reconnect feature for now, until I can get the threaded implementation fully sorted out.  Reconnect is still an option, but it will have to be triggered by user code, not by the client itself.  That's probably for the best, anyways.  It's also almost trivial, so it's not a huge imposition.  Plus most clients will likely want to do something slightly unique in order to reconnect (special penalty logic, failover, etc).

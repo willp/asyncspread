@@ -1,3 +1,4 @@
+import logging
 from services import ServiceTypes
 
 class SpreadMessage(object):
@@ -71,6 +72,7 @@ class SpreadMessageFactory(object):
     the message we received.  It is optimized for DataMessage types.'''
     def __init__(self):
         self._reset()
+        self.logger = logging.getLogger()
 
     def _reset(self):
         self.this_mesg = None
@@ -121,20 +123,22 @@ class SpreadMessageFactory(object):
                 self.this_mesg = NetworkMessage(sender)
                 return self.this_mesg
             # fall-thru error here, unknown change-cause!
-            print 'ERROR: unknown membership change CAUSE.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
+            self.logger.critical('Spread Protocol ERROR: Unknown membership change CAUSE. Unknown svc_type: 0x%04x' % (svc_type)) # TODO: raise exception?
             self.this_mesg = OpaqueMessage(sender, svc_type, mesg_type, is_membership=True)
             return self.this_mesg
         elif svc_type & ServiceTypes.CAUSED_BY_LEAVE:
-            # self-LEAVE message!
+            # self-LEAVE message
             self.this_mesg = LeaveMessage(sender, True)
             return self.this_mesg
-        # strange, sometimes this is received NOT as a regular membership message?
         if svc_type & ServiceTypes.TRANSITION_MESS:
-            # TRANSITIONAL message, a type of membership message
+            # strange, sometimes this is received NOT as a regular membership message?
+            # TRANSITIONAL message, usually it's a type of membership message
             self.this_mesg = TransitionalMessage(sender)
+            self.logger.debug('Spread Protocol: this transitional message was not marked as a Regular Membership Message. '
+                'Svc_type:0x%04x  TransitionalMessage: %s' % (svc_type, self.this_mesg))
             return self.this_mesg
         # fall-thru error here, unknown type
-        #print 'ERROR: unknown message type, neither DataMessage nor MembershipMessage marked.  svc_type=0x%04x' % (svc_type) # TODO: raise exception?
+        self.logger.critical('Spread Protocol ERROR: Unknown message type, neither DataMessage nor MembershipMessage bits set. Unknown svc_type=0x%04x' % (svc_type)) # TODO: raise exception?
         self.this_mesg = OpaqueMessage(sender, svc_type, mesg_type, is_membership=False)
         return self.this_mesg
         #return None

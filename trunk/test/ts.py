@@ -47,7 +47,7 @@ mylistener2.set_group_cb('gr1', GroupCallback(cb_data=data_cb,
                                     cb_start=start_end_cb, cb_end=start_end_cb,
                                     cb_join=join_leave_cb, cb_leave=join_leave_cb,
                                     cb_network=split_cb))
-myname = 'rb01-%03d' % (int(time.time()*10) % 1000)
+myname = 'ts.py-%03d' % (int(time.time()*10) % 1000)
 #myname = 'rb01'
 #print 'My name is: "%s"' % myname
 host = 'localhost'

@@ -29,6 +29,11 @@ class NullLogHandler(logging.Handler):
 # This happens at import-time.  I think it's polite.
 logging.getLogger().addHandler(NullLogHandler())
 
+def print_tb(logger):
+        (exc_type, exc_val, tback) = sys.exc_info()
+        logger.warning('handle_error(): Got exception: %s' % exc_val)
+        logger.info('Traceback: ' + traceback.format_exc())
+        sys.exc_clear()
 
 class AsyncChat26(asynchat.async_chat):
     '''helper to fix for python2.4 asynchat missing a 'map' parameter'''
@@ -194,10 +199,10 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         print 'wait_for_connection() returning'
         return self.is_connected()
 
-    def poll(self, timeout=0.001):
+    def poll(self, timeout=0.001, count=1):
         '''spend time on the socket layer (asyncore.loop), looking for IO, invoking IO handlers'''
         if True:# not self.dead:
-            asyncore.loop(timeout=timeout, count=1, use_poll=True, map=self.my_map)
+            asyncore.loop(timeout=timeout, count=count, use_poll=True, map=self.my_map)
         if self._is_timer():
             self.listener._process_timer(self)
 
@@ -248,9 +253,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         '''invoked when an error happens on the socket (unexpected error) or an unhandled
         exception occurs in an IO handler.'''
         (exc_type, exc_val, tback) = sys.exc_info()
-        self.logger.warning('handle_error(): Got exception: %s' % exc_val)
-        self.logger.info('Traceback: ' + traceback.format_exc())
-        sys.exc_clear()
+        print_tb(self.logger)
         self.listener._process_error(self, exc_val)
         self._drop()
         self.listener._process_dropped(self)
@@ -588,12 +591,6 @@ class AsyncSpreadThreaded(AsyncSpread):
         self.out_queue.append(pkt)
 
     def start_io_thread(self):
-        '''This is now thread-safe
-        1. obtain lock on io_thread_lock (BLOCKING)
-        2. check self.io_thread is None
-        3. if False, start thread and set True
-        4. else release lock and return
-        '''
         print 'Starting IO thread'
         name_str = 'AsyncSpreadThreaded I/O Thread: %s' % (self.name)
         thr = threading.Thread(target=self.do_io, args=[name_str], name=name_str)
@@ -611,8 +608,7 @@ class AsyncSpreadThreaded(AsyncSpread):
         return self.wait_for_connection(timeout)
 
     def wait_for_connection(self, timeout):
-        '''If io thread is not started, start it.
-        Then wait up to timeout seconds for connection to be completed.'''
+        '''wait up to C{timeout} seconds for connection to be completed.'''
         print 'wait_for_connection(): Waiting up to %0.3f seconds for session_up to be set()' % (timeout)
         self.session_up.wait(timeout)
         return self.is_connected()
@@ -638,7 +634,8 @@ class AsyncSpreadThreaded(AsyncSpread):
                 # check to see if we want to restart the connection here:
                 if self.do_restart.isSet():
                     self._do_connect() # clears do_restart
-                    self.run(timeout=0.1, count=5)
+                    #self.run(timeout=0.1, count=5)
+                    self.poll(timeout=0.1, count=10)
                 else:
                     self.do_restart.wait(0.5)
         print '\n%s>> IO Thread exiting' % (thr_name)
@@ -656,4 +653,3 @@ class AsyncSpreadThreaded(AsyncSpread):
         then be called.
         '''
         pass
-

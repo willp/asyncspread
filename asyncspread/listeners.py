@@ -1,6 +1,12 @@
 '''Spread Listeners are implemented here'''
+import time, logging, threading, traceback
 from message import *
-import time
+
+def print_tb(logger):
+        (exc_type, exc_val, tback) = sys.exc_info()
+        logger.warning('handle_error(): Got exception: %s' % exc_val)
+        logger.info('Traceback: ' + traceback.format_exc())
+        sys.exc_clear()
 
 class SpreadListener(object):
     '''Base generic SpreadListener class which implements the core functionality of
@@ -9,6 +15,7 @@ class SpreadListener(object):
     messages, membership notifications, connection failures, and connection success.'''
     def __init__(self):
         self._clear_groups()
+        self.logger = logging.getLogger()
 
     def _clear_groups(self):
         self.groups = dict()
@@ -122,21 +129,30 @@ class SpreadPingListener(SpreadListener):
         # IDs for mapping pings back to requests (overkill, I know)
         self.ping_callbacks = dict()
         self.ping_id = 0
+        self.ping_lock = threading.Lock()
         self.clear_stats()
 
     def clear_stats(self):
         # counters
-        self.ping_sent = 0
-        self.ping_recv = 0
-        self.ping_late = 0
+        if self.ping_lock.acquire():
+            self.ping_sent = 0
+            self.ping_recv = 0
+            self.ping_late = 0
+            self.ping_lock.release()
 
     def pktloss(self):
         if self.ping_sent == 0:
             return 0
-        pktloss = self.ping_recv / self.ping_sent * 100.0
+        if self.ping_lock.acquire():
+            pktloss = self.ping_recv / self.ping_sent * 100.0
+            self.ping_lock.release()
         return pktloss
 
     def _process_data(self, conn, message):
+        '''the SpreadPingListener's _process_data() method intercepts any self-directed
+        messages which are self-pings and processes the ping callback.  If the message
+        is not a self-ping, it is not intercepted and instead is passed up to the handle_data()
+        method.'''
         data = message.data
         if (message.mesg_type == self.ping_mtype and
             len(message.groups) == 1 and
@@ -148,41 +164,56 @@ class SpreadPingListener(SpreadListener):
             # pings expire, handle late arrivals here, devour silently
             if ping_id not in self.ping_callbacks:
                 self.ping_late += 1
+                self.logger.debug('Late ping (id=%s) discarded because it already timed out.' % (ping_id))
                 return
-            (ping_cb, send_time, timeout) = self.ping_callbacks.pop(ping_id)
-            self.ping_recv += 1
-            ping_cb (True, elapsed)
+            if self.ping_lock.acquire(): # always true, and blocks
+                (ping_cb, send_time, timeout) = self.ping_callbacks.pop(ping_id)
+                self.ping_recv += 1
+                self.ping_lock.release()
+            try:
+                ping_cb (True, elapsed)
+            except:
+                self.logger.critical('User ping callback threw an exception.')
+                print_tb(self.logger) # logs traceback
             return
+        # otherwise, just handle this as a regular data message
         self.handle_data(conn, message)
 
     def handle_timer(self, conn):
-        '''moved check_timeouts() here'''
+        '''Ping expiration happens here.
+        This is now thread safe'''
         pending_pings = len(self.ping_callbacks)
         if pending_pings == 0:
             return
         timeouts = []
         now = time.time()
-        for ping_id, cb_items in self.ping_callbacks.iteritems():
-            (timer_cb, time_sent, timeout) = cb_items
-            expire = time_sent + timeout
-            if now >= expire:
-                #print 'EXPIRING ping id %d because now %.4f is > expire %.4f' % (ping_id, now, expire)
-                timeouts.append(ping_id)
+        if self.ping_lock.acquire(): # always true, block, get the lock...
+            for ping_id, cb_items in self.ping_callbacks.iteritems():
+                (timer_cb, time_sent, timeout) = cb_items
+                expire = time_sent + timeout
+                if now >= expire:
+                    self.logger.debug('Expiring ping id %d because now %.4f is > expire %.4f' % (ping_id, now, expire))
+                    timeouts.append(ping_id)
+            self.ping_lock.release() # end of lock...
         for ping_id in timeouts:
             (user_cb, time_sent, timeout) = self.ping_callbacks.pop(ping_id)
             elapsed = now - time_sent
             try:
                 user_cb(False, elapsed)
-            except: pass
+            except:
+                self.logger.warning('Exception in timer handler when invoking user timer callback.')
+                print_tb(self.logger)# logs traceback
 
     def ping(self, conn, callback, timeout=30):
         payload = 'PING:%d:%.8f'
-        this_id = self.ping_id
-        self.ping_id += 1 # not thread-safe here, also may wrap, oh well
-        payload = payload % (this_id, time.time())
-        mesg_type = self.ping_mtype
-        self.ping_callbacks[this_id] = (callback, time.time(), timeout)
-        self.ping_sent += 1
+        if self.ping_lock.acquire(): # always true, and blocks
+            this_id = self.ping_id
+            self.ping_id += 1 # TODO: make thread-safe here.
+            payload = payload % (this_id, time.time())
+            mesg_type = self.ping_mtype
+            self.ping_callbacks[this_id] = (callback, time.time(), timeout)
+            self.ping_sent += 1
+            self.ping_lock.release()
         conn.unicast(conn.session_name, payload, mesg_type)
 
 class GroupCallback(object):
@@ -258,8 +289,7 @@ class CallbackListener(SpreadListener):
                 try:
                     cb_ref(*args)
                 except:
-                    print 'Exception in client callback' # TODO: add traceback output here
-                    # also TODO: perhaps invoke an error handler callback? or use logging?
+                    print_tb(self.logger) # logs traceback
 
     def handle_data(self, conn, message):
         if self.cb_data:
@@ -283,18 +313,23 @@ class CallbackListener(SpreadListener):
     def handle_network_split(self, conn, group, changes, old_membership, new_membership):
         self._invoke_cb(group, 'cb_network', (group, changes, old_membership, new_membership))
 
-    def join_with_wait(self, conn, group, timeout=10):
-        '''Join group, and return when the join was successfully joined, or if the timeout expired'''
+    def join_with_wait(self, conn, group, timeout=15):
+        '''Join group, and return when the join was successfully joined, or if the timeout expired.
+        This will block up to C<timeout> seconds.
+        For nonthreaded usage, this method needs to result in a loop that causes poll() to be hit repeatedly so
+        asyncore gets some time to do network IO.
+        For threaded usage, this method should just sleep.  (Though it should abort early if the connection is lost...)
+        '''
         expire_time = time.time() + timeout
         joined = False
         members = []
-        def done(conn, group, membership):
+        def _done(conn, group, membership):
             joined = True
             members = membership
-            print 'GCB invoked! Group "%s" joined! Members: %s' % (group, members)
-        self.set_group_cb(group, GroupCallback(cb_start=done))
+            self.logger.debug('Internal closure group joined callback invoked! Group "%s" joined! Members: %s' % (group, members))
+        self.set_group_cb(group, GroupCallback(cb_start=_done))
         conn.join(group)
-        while time.time() < expire_time and not joined:
+        while not joined and time.time() < expire_time:
             conn.loop(1) # TODO: broken! fixme! doesn't work with threaded asyncspread
             print 'waiting for join to group "%s"' % (group)
             time.sleep(0.1)
@@ -304,39 +339,41 @@ class DebugListener(SpreadListener):
     '''super verbose'''
 
     def handle_connected(self, conn):
-        print 'DEBUG: Got connected, new session is ready!'
+        self.logger.debug('DEBUG: Got connected, new session is ready!')
 
     def handle_dropped(self, conn):
-        print 'DEBUG: Lost connection!'
+        self.logger.debug('DEBUG: Lost connection!')
 
     def handle_error(self, conn, exc):
-        print 'DEBUG: Got error! Exception:', type(exc), exc
+        self.logger.debug('DEBUG: Got error! Exception:%s, %s' % (type(exc), exc))
 
     def handle_data(self, conn, message):
-        print 'DEBUG: Received message:', message
+        self.logger.debug('DEBUG: Received message:%s' % message)
 
     def handle_group_start(self, conn, group, membership):
-        print 'DEBUG: New Group Joined', group, 'members:', membership
+        self.logger.debug('DEBUG: New Group Joined:%s  Members:%s' % (group, membership))
 
     def handle_group_trans(self, conn, group):
-        print 'DEBUG: Transitional message received, not much actionable here. Group:', group
+        self.logger.debug('DEBUG: Transitional message received, not much actionable here. Group:%s' % group)
 
     def handle_group_end(self, conn, group, old_membership):
-        print 'DEBUG: Group no longer joined:', group, 'Old membership:', old_membership
+        self.logger.debug('DEBUG: Group no longer joined:%s  Old membership:%s' % (group, old_membership))
 
     def handle_group_join(self, conn, group, member, cause):
-        print 'DEBUG: Group Member Joined group:', group, 'Member:', member, 'Cause:', cause
+        self.logger.debug('DEBUG: Group Member Joined group:%s  Member: %s  Cause:%s' % (group, member, cause))
 
     def handle_group_leave(self, conn, group, member, cause):
-        print 'DEBUG: Group Member Left group:', group, 'Member:', member, 'Cause:', cause
+        self.logger.debug('DEBUG: Group Member Left group:%s  Member:%s  Cause:%s' % (group, member, cause))
 
     def handle_network_split(self, conn, group, changes, old_membership, new_membership):
-        print 'DEBUG: Network Split event, group:', group, 'Number changes:', changes, 'Old Members:', old_membership, 'New members:', new_membership
+        self.logger.debug('DEBUG: Network Split event, group:%s Number changes:%d  Old Members:%s New members:%s' % (group, changes, old_membership, new_membership))
 
     def handle_timer(self, conn):
-        print 'DEBUG: Timer tick...'
+        self.logger.debug('DEBUG: Timer tick...')
         # now invoke any parent class handle_timer() method too
         try:
             super(DebugListener, self).handle_timer(conn)
         except:
-            print 'DEBUG: Parent class threw an exception in handle_timer()' # TODO: print traceback here
+            self.logger.warning('DEBUG: Parent class threw an exception in handle_timer()')
+            print_tb(self.logger) # log traceback
+

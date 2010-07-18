@@ -30,6 +30,15 @@ I've learned one thing in this process: writing a client library that works as a
 
 At least this _is_context_callback() method (acting kind of like a context manager) is generalizable and covers both cases.  It reflects the truth that this API is not fully reentrant.
 
+. . .
+
+Later that same day...
+
+I just read through some of the Twisted tickets/issues tracker and found exactly this same issue that was reported 4 years ago and resolved 4 months ago.  Not coincidentally, their method is named run().  Their approach is to raise an exception if a callback attempts to reenter the main loop, by checking a self._started boolean.  Interestingly, they also have a self._stopped variable, so I am guessing they also have interstitial states between started and stopped, as I do with the interstitial states between issuing a start_connect() and actually being connected.
+
+
+
+
 === July 14, 2010 ===
 
 I sketched out the pieces and decided to remove the auto-reconnect feature for now, until I can get the threaded implementation fully sorted out.  Reconnect is still an option, but it will have to be triggered by user code, not by the client itself.  That's probably for the best, anyways.  It's also almost trivial, so it's not a huge imposition.  Plus most clients will likely want to do something slightly unique in order to reconnect (special penalty logic, failover, etc).

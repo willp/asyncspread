@@ -1,10 +1,10 @@
 '''Spread Listeners are implemented here'''
-import time, logging, threading, traceback
+import time, logging, threading, traceback, sys
 from message import *
 
-def print_tb(logger):
+def print_tb(logger, who):
         (exc_type, exc_val, tback) = sys.exc_info()
-        logger.warning('handle_error(): Got exception: %s' % exc_val)
+        logger.warning('%s: Got exception: %s: %s' % (who, type(exc_val), exc_val))
         logger.info('Traceback: ' + traceback.format_exc())
         sys.exc_clear()
 
@@ -30,18 +30,27 @@ class SpreadListener(object):
     def update_group_membership(self, conn, message):
         group = message.group
         if isinstance(message, TransitionalMessage):
-            self.handle_group_trans(conn, group)
+            try:
+                self.handle_group_trans(conn, group)
+            except:
+                print_tb(self.logger, 'SpreadListener.handle_group_trans(group=%s)' % (group))
             return
         new_membership = set(message.members)
         # new group!
         if not self.groups.has_key(group):
             self.groups[group] = new_membership
-            self.handle_group_start(conn, group, new_membership)
+            try:
+                self.handle_group_start(conn, group, new_membership)
+            except:
+                print_tb(self.logger, 'SpreadListener.handle_group_start(group=%s)' % (group))
             return
         old_membership = self.groups[group]
         if (isinstance(message, LeaveMessage) and message.self_leave) or len(new_membership) == 0:
             del self.groups[group]
-            self.handle_group_end(conn, group, old_membership)
+            try:
+                self.handle_group_end(conn, group, old_membership)
+            except:
+                print_tb(self.logger, 'SpreadListener.handle_group_end(group=%s)' % (group))
             return
         # now compute differences
         differences = old_membership ^ new_membership # symmetric difference
@@ -50,21 +59,33 @@ class SpreadListener(object):
         # notify if we have a network split event
         if isinstance(message, NetworkMessage):
             changes = len(new_membership) - len(old_membership)
-            self.handle_network_split(conn, group, changes, old_membership, new_membership)
+            try:
+                self.handle_network_split(conn, group, changes, old_membership, new_membership)
+            except:
+                print_tb(self.logger, 'SpreadListener.handle_network_split')
         for member in differences:
             if member not in old_membership:
                 # this is an add
-                self.handle_group_join(conn, group, member, cause)
+                try:
+                    self.handle_group_join(conn, group, member, cause)
+                except:
+                    print_tb(self.logger, 'SpreadListener.handle_group_join(group=%s)' % (group))
             else:
                 # this is a leave/departure
-                self.handle_group_leave(conn, group, member, cause)
+                try:
+                    self.handle_group_leave(conn, group, member, cause)
+                except:
+                    print_tb(self.logger, 'SpreadListener.handle_group_leave(group=%s)' % (group))
 
     def get_group_members(self, group):
         return self.groups[group]
 
     # this method is called once every so often by the "main loop" of AsyncSpread
     def _process_timer(self, conn):
-        self.handle_timer(conn)
+        try:
+            self.handle_timer(conn)
+        except:
+            print_tb(self.logger, 'SpreadListener.handle_timer')
 
     def handle_timer(self, conn):
         '''override this to have your listener invoked once in a while (configurable?) to do maintenance'''
@@ -77,16 +98,28 @@ class SpreadListener(object):
     # TODO: wrap the handle_() methods with try/except?
 
     def _process_data(self, conn, message):
-        self.handle_data(conn, message)
+        try:
+            self.handle_data(conn, message)
+        except:
+            print_tb(self.logger, 'SpreadListener.handle_data')
 
     def _process_connected(self, conn):
-        self.handle_connected(conn)
+        try:
+            self.handle_connected(conn)
+        except:
+            print_tb(self.logger, 'SpreadListener.handle_connected')
 
     def _process_error(self, conn, exc):
-        self.handle_error(conn, exc)
+        try:
+            self.handle_error(conn, exc)
+        except:
+            print_tb(self.logger, 'SpreadListener.handle_error')
 
     def _process_dropped(self, conn):
-        self.handle_dropped(conn)
+        try:
+            self.handle_dropped(conn)
+        except:
+            print_tb(self.logger, 'SpreadListener.handle_dropped')
         # AFTER doing handle_dropped(), clear out the group membership
         self._clear_groups()
 
@@ -174,10 +207,13 @@ class SpreadPingListener(SpreadListener):
                 ping_cb (True, elapsed)
             except:
                 self.logger.critical('User ping callback threw an exception.')
-                print_tb(self.logger) # logs traceback
+                print_tb(self.logger, 'PingListener ping callback') # logs traceback
             return
         # otherwise, just handle this as a regular data message
-        self.handle_data(conn, message)
+        try:
+            self.handle_data(conn, message)
+        except:
+            print_tb(self.logger, 'SpreadPingListener handle_data')
 
     def handle_timer(self, conn):
         '''Ping expiration happens here.
@@ -202,13 +238,13 @@ class SpreadPingListener(SpreadListener):
                 user_cb(False, elapsed)
             except:
                 self.logger.warning('Exception in timer handler when invoking user timer callback.')
-                print_tb(self.logger)# logs traceback
+                print_tb(self.logger, 'PingListener user ping callback')# logs traceback
 
     def ping(self, conn, callback, timeout=30):
         payload = 'PING:%d:%.8f'
         if self.ping_lock.acquire(): # always true, and blocks
             this_id = self.ping_id
-            self.ping_id += 1 # TODO: make thread-safe here.
+            self.ping_id += 1
             payload = payload % (this_id, time.time())
             mesg_type = self.ping_mtype
             self.ping_callbacks[this_id] = (callback, time.time(), timeout)
@@ -289,7 +325,7 @@ class CallbackListener(SpreadListener):
                 try:
                     cb_ref(*args)
                 except:
-                    print_tb(self.logger) # logs traceback
+                    print_tb(self.logger, 'GroupCallbackListener._invoke_cb(%s on group %s)' % (callback, group)) # logs traceback
 
     def handle_data(self, conn, message):
         if self.cb_data:
@@ -330,13 +366,13 @@ class CallbackListener(SpreadListener):
         self.set_group_cb(group, GroupCallback(cb_start=_done))
         conn.join(group)
         while not joined and time.time() < expire_time:
-            conn.loop(1) # TODO: broken! fixme! doesn't work with threaded asyncspread
+            conn.run(timeout=0.1, count=10) # should work in threaded and non-threaded code just fine
             print 'waiting for join to group "%s"' % (group)
             time.sleep(0.1)
         return joined
 
 class DebugListener(SpreadListener):
-    '''super verbose'''
+    '''some verbose logging to debug level on various events'''
 
     def handle_connected(self, conn):
         self.logger.debug('DEBUG: Got connected, new session is ready!')
@@ -375,5 +411,5 @@ class DebugListener(SpreadListener):
             super(DebugListener, self).handle_timer(conn)
         except:
             self.logger.warning('DEBUG: Parent class threw an exception in handle_timer()')
-            print_tb(self.logger) # log traceback
+            print_tb(self.logger, 'DebugListener handle_timer user callback') # log traceback
 

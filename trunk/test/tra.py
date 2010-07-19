@@ -22,8 +22,21 @@ print 'I am', myname1, 'and:', myname2
 
 class MyListener(SpreadPingListener):
     def handle_data(self, conn, message):
-        print 'Got message:', message
+        print '%s> Got message:%s' % (conn.name, message)
         print 'From connection:', conn
+    def handle_dropped(self, conn):
+        print '%s> Got dropped!' % (conn.name)
+        print '%s> Reconnecting!' % (conn.name)
+        done = False
+        loop = 0
+        while not done:
+            loop += 1
+            ret = conn.start_connect(10)
+            done = ret or (loop > 10)
+            print '%s> Hope I got reconnected! ret:%s  loop:%s' % (conn.name, ret, loop)
+            if not ret:
+                print '%s> nope, sleeping 1 sec' % (conn.name)
+                time.sleep(1)
 
 map=dict()
 listener = MyListener()
@@ -52,11 +65,16 @@ while sp1.connected or sp2.connected:
     listener.ping(sp1, ping_response)
     listener.ping(sp2, ping_response)
     sp1.run(timeout=1, count=1)
-    if loop > 5000:
+    if loop > 10:
+        while loop < 100:
+            sp1.run(count=10)
+            sp2.run(count=10)
+            loop += 0.1
+    if loop >= 100:
         print 'disconnecting sp1'
         sp1.disconnect()
-        sp1.run(100)
+        sp1.run(count=100)
         print 'disconnecting sp2'
         sp2.disconnect()
-        sp2.run(100)
+        sp2.run(count=100)
         print 'ought to be disconnected now...'

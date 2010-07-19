@@ -1,5 +1,6 @@
 '''AsyncSpread connection module, contains AsyncSpread and AsyncSpreadThreaded classes'''
 import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback, itertools
+import warnings
 from collections import deque
 from message import *
 from services import *
@@ -29,11 +30,12 @@ class NullLogHandler(logging.Handler):
 # This happens at import-time.  I think it's polite.
 logging.getLogger().addHandler(NullLogHandler())
 
-def print_tb(logger):
+def print_tb(logger, who):
         (exc_type, exc_val, tback) = sys.exc_info()
-        logger.warning('handle_error(): Got exception: %s' % exc_val)
-        logger.info('Traceback: ' + traceback.format_exc())
-        sys.exc_clear()
+        logger.warning('Error: Got exception in %s: %s: %s' % (who, type(exc_val), exc_val))
+        if exc_val is not None:
+            logger.info('Traceback: ' + traceback.format_exc())
+            sys.exc_clear()
 
 class AsyncChat26(asynchat.async_chat):
     '''helper to fix for python2.4 asynchat missing a 'map' parameter'''
@@ -145,12 +147,14 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.next_state = None
         # more settings (is conn dead?)
         self.dead = False
+        self.last_drop = None
         # new events for threaded signalling:
         self.session_up = threading.Event()
         # more connection state, reconnect flag:
         self.do_restart = threading.Event()
         # more connection state, want shutdown:
         self.shutdown = False
+        self._in_callback = False
         # handle startup connection
         if start_connect:
             self.start_connect()
@@ -173,16 +177,31 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
                 self.logger.warning('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
                 self.keepalive = False
         self.dead = False
+        print '<%s> issuing connect()' % (self.name)
         self.connect((self.host, self.port))
 
     def is_connected(self):
         return self.session_up.isSet()
 
+    def _is_context_callback(self):
+        return self._in_callback
+
+    def _set_context_callback(self, flag):
+        self._in_callback = flag
+
+    def _do_restart(self):
+        self._do_connect()
+
     def start_connect(self, timeout=10):
         '''invoke this to begin the connection process to the server'''
         if self.connected:
+            print 'I THINK I AM ALREADY CONNECTED'
             return True
-        self._do_connect()
+        self._do_restart()
+        #self._do_connect()
+        if self._is_context_callback():
+            print 'start_connect():  I AM IN CONTEXT OF A CALLBACK'
+            return True
         return self.wait_for_connection(timeout)
 
     def wait_for_connection(self, timeout, sleep_delay=0.1):
@@ -191,29 +210,35 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         time_end = time.time() + timeout
         # TODO: check to make sure the connection succeeds too, and that we dont want to shut down
         while not self.is_connected() and time.time() < time_end:
-            print 'Waiting for session_up to be set()...'
+            print '<%s> wait_for_connection() Waiting for session_up to be set()... timeout=%s, sleep_delay=%s' % (self.name, timeout, sleep_delay)
             if self.dead or self.shutdown: # maybe dead _is_ shutdown?
                 return False
-            self.poll(timeout/100)
+            self._do_poll(timeout/100)
             time.sleep(sleep_delay)
-        print 'wait_for_connection() returning'
+        print '<%s> wait_for_connection() returning' % (self.name)
         return self.is_connected()
 
     def poll(self, timeout=0.001, count=1):
         '''spend time on the socket layer (asyncore.loop), looking for IO, invoking IO handlers'''
-        if True:# not self.dead:
-            asyncore.loop(timeout=timeout, count=count, use_poll=True, map=self.my_map)
+        asyncore.loop(timeout=timeout, count=count, use_poll=True, map=self.my_map)
         if self._is_timer():
             self.listener._process_timer(self)
+
+    def _do_poll(self, timeout):
+        '''method to do an abstract poll() call, and this _do_poll is overridden by the threaded version
+        so it can be intercepted.'''
+        self._in_callback = True
+        self.poll(timeout)
+        self._in_callback = False
 
     def run(self, timeout=0.1, count=None):
         '''spend more time than poll() doing IO on the connection'''
         main_loop = 0
-        #print 'TIMEOUT is now:', timeout, 'COUNT is:', count
+        print '<%s> run() Timeout is: %s, COUNT is:%s' % (self.name, timeout, count)
         while not self.shutdown and (count is None or main_loop <= count):
             main_loop += 1
-            #print 'POLL! timeout:', timeout, 'main_loop:', main_loop
-            self.poll(timeout)
+            print '<%s> run(): main_loop=%s, timeout=%s, count=%s' % (self.name, main_loop, timeout, count)
+            self._do_poll(timeout)
 
     def set_level(self, level):
         '''totally delegated to internal SpreadProto object'''
@@ -239,25 +264,58 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
             return True
         return False
 
+    def _drop(self):
+        '''internal function to close and clear all state associated with a connection'''
+        self.dead = True
+        self.last_drop = time.time()
+        self.session_name = None
+        self.mfactory = None
+        try:
+            self.close() # changes self.connected to False, usually
+        except: pass
+        self.discard_buffers()
+        self._clear_ibuffer()
+        if self.connected:
+            #self.logger.warning('WARNING: _drop() found self.connected = True and just set it to False!')
+            self.connected = False
+        self.session_name = None
+        self.session_up.clear()
+
     def handle_close(self):
         '''invoked by asyncore when the socket is closed from the server side.'''
         self.logger.warning('Connection lost to server: %s:%d' % (self.host, self.port))
-        self.dead = True
-        self.session_name = None
-        self.mfactory = None
-        self.close()
+        #self.dead = True
+        #self.last_drop = time.time()
+        #self.session_name = None
+        #self.mfactory = None
+        self._drop()
+        #print_tb(self.logger, 'handle_close()')
+        #self.close()
+        #self.connected = False # for good measure
+        #self.session_up.clear()
         self.listener._process_dropped(self)
-        self.session_up.clear()
+
+    def handle_expt(self):
+        print 'HANDLE EXPT!!!!'
+        (exc_type, exc_val, tback) = sys.exc_info()
+        print_tb(self.logger, 'handle_expt()')
+        self._drop()
+        self.listener._process_error(self, exc_val)
 
     def handle_error(self):
         '''invoked when an error happens on the socket (unexpected error) or an unhandled
         exception occurs in an IO handler.'''
         (exc_type, exc_val, tback) = sys.exc_info()
-        print_tb(self.logger)
-        self.listener._process_error(self, exc_val)
+        print_tb(self.logger, 'handle_error()')
+        self.last_drop = time.time()
+        if self.session_up.isSet():
+            print 'THIS WAS A LOST CONNECTION'
+        else:
+            print 'Was not session-up, this was a failed connect/authentication'
         self._drop()
-        self.listener._process_dropped(self)
         self.session_up.clear()
+        self.listener._process_error(self, exc_val)
+        self.listener._process_dropped(self)
 
     def handle_connect(self):
         '''invoked by asyncore when connect() returns a successful socket connection to the server'''
@@ -266,18 +324,6 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         connect_msg = SpreadProto.protocol_connect(self.name, self.membership_notifications, self.priority_high)
         self.wait_bytes(1, self.st_auth_read)
         self.push(connect_msg)
-
-    def _drop(self):
-        '''internal function to close and clear all state associated with a connection'''
-        self.dead = True
-        self.close() # changes self.connected to False, usually
-        self.discard_buffers()
-        self._clear_ibuffer()
-        if self.connected:
-            #self.logger.warning('WARNING: _drop() found self.connected = True and just set it to False!')
-            self.connected = False
-        self.session_name = None
-        self.session_up.clear()
 
     def _send(self, data):
         '''internal method to abstract the difference between threaded and non-threaded enqueue methods.
@@ -492,7 +538,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
     def _do_disconnect(self):
         self._drop() # non-threaded action here can touch the socket
 
-    def disconnect(self):
+    def disconnect(self, shutdown=False):
         '''gracefully disconnect from the server, by sending a KILL (self) request to the server.  If the connection
         is not up, or has already been closed, this method returns False.  Otherwise it returns True.'''
         if not self.is_connected():
@@ -500,9 +546,11 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         who = self.session_name
         disco_msg = SpreadProto.protocol_create(SpreadProto.KILL_PKT, 0, who, [who], 0)
         self._send(disco_msg)
-        self.shutdown = True
-        self._do_disconnect()
+        if shutdown:
+            self.shutdown = True
+        self._do_disconnect() # thread safe due to _do_disconnect() being overridden
         return True
+
 
     def multicast(self, groups, message, mesg_type, self_discard=True):
         '''Send a message to all members of a group.  If the connection is not up, a SpreadException
@@ -547,24 +595,15 @@ class AsyncSpreadThreaded(AsyncSpread):
     - all other methods operate only on a queue that the IO thread will process
     - ONLY the IO thread runs asyncore.loop()
     -- therefore, ONLY the IO thread runs in the st_* methods for processing the protocol
+    -- also,client callbacks can only invoke threadsafe calls.
     - ALL user callbacks will be invoked by a separate thread (perhaps this happens in a run() method? so the
     user's invoking thread is used as the response thread.  could keep things pretty stable.)
     - IO thread is daemonic
     - exceptions are only raised to the user thread
-    - IO thread runs all the time? or only when the connection is up?
-
-    The main AsyncSpread class will turn into a class that you have to invoke .loop() against, to ask it to do asyncore.loop()
-    ... OR... do I want to be more complicated....
-
-    Think about simple client case: I want to connect up to the mesg bus, and send one request to a channel and
-    gather up responses and then disconnect or exit.  The threaded method would be a bit overkill, so the nonthreaded
-    version would work nicely, as long as I have a way to wait for responses.  Maybe I have a wait() method that takes
-    as arguments the # of DataMessages to wait for, or a maximum timeout.  But.. since the handler_*() methods would
-    be invoked for the responses (or callbacklistener does stuff), then maybe I should just use a loop() method that
-    checks a flag and does a graceful disconnect and close() when the flag is set.  There could be a simple method
-    that would set this flag.  Hmm.  That seems most convenient to the user.  Each handle_data() call would decide whether
-    to throw the flag or not.
+    - IO thread runs all the time
     '''
+    reconnect_delay = 3
+
     def __init__(self, *args, **kwargs):
         kwargs['map'] = dict() # ensure all instances get their own distinct map object, to prevent asyncore from exploding
         self.my_map = kwargs['map']
@@ -574,15 +613,10 @@ class AsyncSpreadThreaded(AsyncSpread):
         kwargs['start_connect'] = False
         # invoke superclass
         AsyncSpread.__init__(self, *args, **kwargs)
-        print 'NonThreaded constructor done, Threaded stuff happening now in AsyncSpreadThreaded'
-        self.io_thread = None
-        # more settings
-        if start_connect:
-            self.do_restart.set()
         # outbound messages for threaded uses
         self.out_queue = deque()
+        self.io_thread = self.start_io_thread()
         # handle startup
-        self.start_io_thread()
         if start_connect:
             self.start_connect()
 
@@ -591,25 +625,48 @@ class AsyncSpreadThreaded(AsyncSpread):
         self.out_queue.append(pkt)
 
     def start_io_thread(self):
-        print 'Starting IO thread'
+        self.logger.debug('Starting IO thread')
         name_str = 'AsyncSpreadThreaded I/O Thread: %s' % (self.name)
         thr = threading.Thread(target=self.do_io, args=[name_str], name=name_str)
         thr.daemon = True
         thr.start()
-        self.io_thread = thr
+        return thr
+
+    def _is_context_callback(self):
+        if threading.currentThread() is self.io_thread:
+            return True
+        return False
+
+    def _set_context_callback(self, flag):
+        # don't need to do anything here, because test is done via thread identity checks
+        pass
+
+    def _do_restart(self):
+        self.do_restart.set()
 
     def start_connect(self, timeout=10):
         '''initiate the connection process.  returns True/False after the connection is made or the timeout expires'''
-        print 'start_connect() invoked!'
-        if self.is_connected():
-            return True
-        self.do_restart.set()
         print 'start_connect() timeout:', timeout
+        if self.is_connected():
+            print 'start_connected, ALREADY connected.  Not doing anything!'
+            return True
+        print 'set()ing the Event flag for do_restart.'
+        self._do_restart()
+        #self.do_restart.set() # this line is the only difference between threaded and nonthreaded implementations now
+        # if I am the IO thread, calling in to this from a connection handler, then I need to
+        # simply set a flag and exit.
+        if self._is_context_callback():
+            print 'IO THREAD HANDLER INVOKED start_connect() from same thread! %s' % (self.name)
+            return True
         return self.wait_for_connection(timeout)
 
     def wait_for_connection(self, timeout):
         '''wait up to C{timeout} seconds for connection to be completed.'''
-        print 'wait_for_connection(): Waiting up to %0.3f seconds for session_up to be set()' % (timeout)
+        if self._is_context_callback():
+            warnings.warn('wait_for_connection() called from IO thread, not a permitted operation.  Use start_connect() instead.')
+            return
+        print 'wait_for_connection(): Waiting up to %0.2f seconds for session_up to be set()' % (timeout)
+        print 'doing a session_up wait(%.2f)' % (timeout)
         self.session_up.wait(timeout)
         return self.is_connected()
 
@@ -633,14 +690,21 @@ class AsyncSpreadThreaded(AsyncSpread):
             else:
                 # check to see if we want to restart the connection here:
                 if self.do_restart.isSet():
-                    self._do_connect() # clears do_restart
-                    #self.run(timeout=0.1, count=5)
-                    self.poll(timeout=0.1, count=10)
+                    if self.last_drop is None or time.time() > (self.last_drop + self.reconnect_delay):
+                        self._do_connect() # clears do_restart()
+                        #self.run(timeout=0.1, count=5)
+                        self.poll(timeout=0.1, count=10)
+                    else:
+                        time.sleep(0.1)
                 else:
                     self.do_restart.wait(0.5)
         print '\n%s>> IO Thread exiting' % (thr_name)
-        print 'Myself:', self
+        print 'Myself before _drop:', self
         self._drop()
+        print 'Myself after _drop:', self
+        # one last bit around the event loop...
+        self.poll(timeout=0.1, count=10)
+        print 'and done with all asyncore polling'
         # set self.io_thread to None?
         # self.io_thread = None
 
@@ -653,3 +717,8 @@ class AsyncSpreadThreaded(AsyncSpread):
         then be called.
         '''
         pass
+
+    def _do_poll(self, timeout):
+        '''invoked by run(), needs to only sleep here, because the background thread
+        is going to do the IO work for us.'''
+        time.sleep(timeout)

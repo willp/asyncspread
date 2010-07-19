@@ -1,4 +1,4 @@
-#!/usr/bin/python2.4
+#!/usr/bin/python2.6 -u
 import time, sys, logging
 sys.path.append('.')
 from asyncspread.connection import AsyncSpread, AsyncSpreadThreaded
@@ -12,7 +12,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.INFO)
+setup_logging(logging.DEBUG)
 
 class MyListener(SpreadPingListener):
     def handle_ping(self, success, elapsed):
@@ -26,12 +26,18 @@ def ping_cb(success, elapsed):
 
 def conn_cb(listener, conn):
     print 'Got authenticated.'
+    conn.unicast('hb', 'I just joined! Hello!', 0)
 def drop_cb(listener, conn):
     print 'Client > DROPPED < CB:  conn:', conn
-    print 'Setting reconnect flag'
-    conn.do_reconnect = True
+    print 'GOING TO RESTART CONNECT. Timeout 10'
+    #conn.do_restart.set()
+    conn.wait_for_connection(5)
+    conn.start_connect(5)
+    print 'done with start_connect...'
+#    raise ValueError('This simulates a client code error in the callback.')
 def err_cb(listener, conn, exc):
     print 'Client > ERROR <  CB: conn:', conn, 'Exception:', exc
+#    raise ValueError('This simulates a client code error in the callback.')
 def data_cb(conn, message):
     print 'Client data CB, mesg len:', len(message.data), 'sender:', message.sender, 'groups:', message.groups
 def start_end_cb(conn, group, membership):
@@ -66,7 +72,7 @@ if ret:
 for g in ('gr1', 'group2', 'gr2', 'gr5', 'AZ'):
     sp1.join(g)
 
-for i in xrange(1, 50):
+for i in xrange(1, 10):
     if sp1.dead:
         break
     groups = ['gr1']
@@ -86,13 +92,18 @@ for i in xrange(1, 50):
         sp1.join('gr2')
         sp1.multicast(['gr1'], 'I have left! and I sent this AFTER i left! i=%d' % (i), 0x00ff, self_discard=False)
     sp1.multicast(['gr1'], "A" * 90, 0, self_discard=False) # send big message
-    time.sleep(0.1)
-print 'Entering big long lasting loop...'
-time.sleep(10)
+    time.sleep(0.5)
+print 'Entering big long lasting sleep (30) ...'
+time.sleep(30)
 print 'Done with big loop..'
 sp1.leave('gr18')
 print 'About to disconnect...'
-sp1.disconnect()
+sp1.disconnect(shutdown=True)
 print 'about to exit...'
 time.sleep(2)
+print 'now calling shutdown..'
+#sp1.do_shutdown()
+#sp2.do_shutdown()
+print 'ran shutdown methods... hopefully will exit now'
+print 'Object:', sp1
 sys.exit(0)

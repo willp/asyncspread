@@ -134,6 +134,11 @@ class SpreadMessageFactory(object):
             # strange, sometimes this is received NOT as a regular membership message?
             # TRANSITIONAL message, usually it's a type of membership message
             self.this_mesg = TransitionalMessage(sender)
+            # this might be perfectly normal behavior.  I left this logging.debug() call in here to see how often
+            # it crops up in production.  There isn't really any error here, it's just something curious and probably
+            # means that this TransitionalMessage is somehow different from a non-RegularMembership TransitionalMessage,
+            # and I'd like to know (some day) what that difference really is, and do something with it, like store it as a boolean
+            # in the TransitionalMessage object, so a client can do something meaningful with it.
             self.logger.debug('Spread Protocol: this transitional message was not marked as a Regular Membership Message. '
                 'Svc_type:0x%04x  TransitionalMessage: %s' % (svc_type, self.this_mesg))
             return self.this_mesg

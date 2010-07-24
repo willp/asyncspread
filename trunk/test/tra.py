@@ -1,4 +1,4 @@
-#!/usr/bin/python2.4
+#!/usr/bin/python2.6
 import time, sys, logging
 sys.path.append('.')
 from asyncspread.connection import AsyncSpread, AsyncSpreadThreaded
@@ -15,7 +15,7 @@ def setup_logging(level=logging.INFO):
 def ping_response(success, elapsed):
     print 'Client PING callback: Success: %s.  Elapsed time: %.8f' % (success, elapsed)
 
-setup_logging(logging.INFO)
+setup_logging(logging.DEBUG)
 myname1 = 'tra1-%05d' % (int(time.time()*100) % 1000)
 myname2 = 'tra2-%05d' % (int(time.time()*100) % 1000)
 print 'I am', myname1, 'and:', myname2
@@ -31,12 +31,12 @@ class MyListener(SpreadPingListener):
         loop = 0
         while not done:
             loop += 1
-            ret = conn.start_connect(10)
+            ret = conn.start_connect(1)
             done = ret or (loop > 10)
             print '%s> Hope I got reconnected! ret:%s  loop:%s' % (conn.name, ret, loop)
             if not ret:
                 print '%s> nope, sleeping 1 sec' % (conn.name)
-                time.sleep(1)
+                time.sleep(0.001)
 
 map=dict()
 listener = MyListener()
@@ -73,7 +73,7 @@ while sp1.connected or sp2.connected:
     if loop >= 100:
         print 'disconnecting sp1'
         sp1.disconnect()
-        sp1.run(count=100)
+        sp1.run(count=1000)
         print 'disconnecting sp2'
         sp2.disconnect()
         sp2.run(count=100)

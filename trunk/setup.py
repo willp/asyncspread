@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 from distutils.core import setup
 import asyncspread
 from asyncspread.connection import AsyncSpread

@@ -15,7 +15,7 @@ def setup_logging(level=logging.INFO):
 def ping_response(success, elapsed):
     print 'Client PING callback: Success: %s.  Elapsed time: %.8f' % (success, elapsed)
 
-setup_logging(logging.INFO)
+setup_logging(logging.DEBUG)
 myname1 = 'trw1-%05d' % (int(time.time()*100) % 1000)
 myname2 = 'trw2-%05d' % (int(time.time()*100) % 1000)
 print 'I am', myname1, 'and:', myname2
@@ -38,7 +38,7 @@ sp1 = AsyncSpreadThreaded(myname1, host, port, listener=listener, start_connect=
 print 'SP1 is:', sp1
 sp2 = AsyncSpreadThreaded(myname2, host, port, listener=listener, start_connect=False, map=map)
 sp1.start_connect(1)
-sp1.join('gr1')
+#sp1.join('gr1')
 sp2.start_connect(1)
 for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ', ''):
     sp1.join(g)

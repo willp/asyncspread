@@ -8,7 +8,7 @@ from listeners import *
 from expt import *
 
 
-'''This code is released for use under the Gnu Public License V3 (GPLv3).
+'''This code is released for use under the GNU Public License V3 (GPLv3).
 
 Thanks to Spread Concepts, LLC., especially Amir Yair and Jonathan Stanton for
 the Spread toolkit.
@@ -628,8 +628,8 @@ class AsyncSpreadThreaded(AsyncSpread):
         self.out_queue.append(pkt)
 
     def _start_io_thread(self):
-        self.logger.debug('Starting IO thread')
         name_str = 'AsyncSpreadThreaded I/O Thread: %s' % (self.name)
+        self.logger.debug('Starting IO thread "%s"' % (self.name))
         thr = threading.Thread(target=self.do_io, args=[name_str], name=name_str)
         thr.daemon = True
         thr.start()

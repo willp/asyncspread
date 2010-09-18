@@ -39,6 +39,7 @@ class MyListener(SpreadPingListener):
                 time.sleep(0.001)
 
 map=dict()
+map2=dict()
 listener = MyListener()
 host = 'localhost'
 port = 24999
@@ -48,7 +49,7 @@ if len(sys.argv) > 2:
     port = int(sys.argv[2])
 sp1 = AsyncSpread(myname1, host, port, listener=listener, start_connect=False, map=map)
 print 'SP1 is:', sp1
-sp2 = AsyncSpread(myname2, host, port, listener=listener, start_connect=False, map=map)
+sp2 = AsyncSpread(myname2, host, port, listener=listener, start_connect=False, map=map2)
 sp1.start_connect()
 sp2.start_connect()
 print 'My map:', map
@@ -57,8 +58,8 @@ for g in ('gr1', 'gr2', 'abc123', 'def', 'group2', 'AZ', ''):
     sp2.join(g)
 loop=0
 while sp1.connected or sp2.connected:
-    loop += 1
     print 'client top of loop'
+    loop += 1
     sp1.multicast(['gr2', 'AZ'], 'my multicast num %d' % (loop), 0, self_discard=False)
     sp1.multicast([], 'To No groups: my multicast num %d' % (loop), 0, self_discard=False)
     sp2.multicast(['gr2', 'AZ'], 'SECOND connection: multicast num %d' % (loop), 0, self_discard=False)

@@ -22,11 +22,10 @@ print 'I am', myname1, 'and:', myname2
 def got_conn(listener, conn):
     print 'Got connected:', conn
     for g in (':Disc', ':HB', ':Log'):
-        conn.join(g)
-def got_data(listener, conn, message):
-    print '%s>>  %s' % (conn.name, message)
+        try: conn.join(g)
+        except: pass
 def got_dropped(listener, conn):
-    print 'Lost connection to spread server'
+    print 'Lost connection to spread server on:', conn.name, 'Reconnecting...'
     conn.start_connect()
 def got_error(listener, conn, exc):
     print 'Got exception/error:', str(exc)
@@ -34,7 +33,7 @@ def got_error(listener, conn, exc):
         print 'Connection refused by server... Sleeping 1 seconds...'
         time.sleep(1)
 
-listener = CallbackListener(cb_conn=got_conn, cb_data=got_data, cb_dropped=got_dropped, cb_error=got_error)
+listener = CallbackListener(cb_conn=got_conn, cb_dropped=got_dropped, cb_error=got_error)
 
 host = 'localhost'
 port = 24999

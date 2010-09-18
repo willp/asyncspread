@@ -41,8 +41,14 @@ def hb_mesg(conn, message):
     print 'HB message: %s' % (message)
 gcb_hb = GroupCallback(cb_join=hb_join, cb_leave=hb_leave, cb_data=hb_mesg)
 
-listener = CallbackListener(cb_conn=got_conn, cb_dropped=got_dropped, cb_error=got_error)
-listener.set_group_cb(':HB', gcb_hb)
+def new_hb_listener():
+    '''factory style method for returning a new CallbackListener, wired up with generic HB connection callbacks'''
+    return CallbackListener(cb_conn=got_conn, cb_dropped=got_dropped, cb_error=got_error)
+
+listener1 = new_hb_listener()
+listener2 = new_hb_listener()
+for lst in [listener1, listener2]:
+    lst.set_group_cb(':HB', gcb_hb)
 
 host = 'localhost'
 port = 24999

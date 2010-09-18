@@ -18,7 +18,7 @@ class DataMessage(SpreadMessage):
         self.data = ''
 
     def __repr__(self):
-        return '%s:  sender:%s,  mesg_type:%d,  groups:%s,  self-disc:%s,  data:"%s"' % (self.__class__,
+        return '%s:  sender:%s, mesg_type:%d, groups:%s, self-disc:%s, data:"%s"' % (self.__class__,
                             self.sender, self.mesg_type, self.groups, self.self_discarded, self.data)
 
 class OpaqueMessage(SpreadMessage):
@@ -32,7 +32,7 @@ class OpaqueMessage(SpreadMessage):
         self.data = ''
 
     def __repr__(self):
-        return '%s:  svc_type: 0x%04x  mesg_type:%d  sender:%s  groups:%s  data(%d bytes):"%s"' % (self.svc_type,
+        return '%s:  svc_type: 0x%04x, mesg_type:%d, sender:%s, groups:%s, data(%d bytes):"%s"' % (self.svc_type,
                     self.mesg_type, self.__class__, self.sender, self.groups, len(self.data), self.data)
 
 class MembershipMessage(SpreadMessage):
@@ -45,7 +45,7 @@ class MembershipMessage(SpreadMessage):
         self.members = groups
 
     def __repr__(self):
-        return '%s:  group:%s,  members:%s' % (self.__class__, self.group, self.members)
+        return '%s: group:%s, members:%s' % (self.__class__, self.group, self.members)
 
 class TransitionalMessage(MembershipMessage):
     pass
@@ -65,7 +65,7 @@ class LeaveMessage(MembershipMessage):
         self.self_leave = self_leave
 
     def __repr__(self):
-        return '%s:  group:%s,  self_leave:%s' % (self.__class__, self.group, self.self_leave)
+        return '%s: group:%s, self_leave:%s' % (self.__class__, self.group, self.self_leave)
 
 class SpreadMessageFactory(object):
     '''Class to determine the kind of spread message and return an object that represents

@@ -331,8 +331,10 @@ class CallbackListener(SpreadListener):
             if cb_ref:
                 try:
                     cb_ref(*args)
+                    return True
                 except:
                     print_tb(self.logger, 'GroupCallbackListener._invoke_cb(%s on group %s)' % (callback, group)) # logs traceback
+        return False
 
     def handle_data(self, conn, message):
         args = (self, conn, message)
@@ -341,8 +343,8 @@ class CallbackListener(SpreadListener):
         groups = message.groups
         found_group = False
         for group in groups:
-            found_group = True
-            self._invoke_cb(group, 'cb_data', (conn, message))
+            if self._invoke_cb(group, 'cb_data', (conn, message)):
+                found_group = True
         if self.cb_unk_group and not found_group:
             self._safe_cb(self.cb_unk_group, args)
 
@@ -378,7 +380,7 @@ class CallbackListener(SpreadListener):
         self.set_group_cb(group, GroupCallback(cb_start=_done))
         conn.join(group)
         while not joined and time.time() < expire_time:
-            conn.run(timeout=0.1, count=10) # should work in threaded and non-threaded code just fine
+            conn.run(count=10, timeout=0.1) # should work in threaded and non-threaded code just fine
             print 'waiting for join to group "%s"' % (group)
             time.sleep(0.1)
         return joined

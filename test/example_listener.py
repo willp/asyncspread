@@ -14,7 +14,7 @@ def setup_logging(level=logging.INFO):
 def ping_response(success, elapsed):
     print 'Client PING callback: Success: %s.  Elapsed time: %.8f' % (success, elapsed)
 
-setup_logging(logging.WARNING)
+setup_logging(logging.INFO)
 myname1 = 'ExL1-%05d' % (int(time.time()*100) % 1000)
 myname2 = 'ExL2-%05d' % (int(time.time()*100) % 1000)
 print 'I am', myname1, 'and:', myname2
@@ -22,8 +22,8 @@ print 'I am', myname1, 'and:', myname2
 def got_conn(listener, conn):
     print 'Got connected:', conn
     for g in (':Disc', ':HB', ':Log'):
-        try: conn.join(g)
-        except: pass
+        print 'joining:', g
+        conn.join(g)
 def got_dropped(listener, conn):
     print 'Lost connection to spread server on:', conn.name, 'Reconnecting...'
     conn.start_connect()
@@ -33,7 +33,16 @@ def got_error(listener, conn, exc):
         print 'Connection refused by server... Sleeping 1 seconds...'
         time.sleep(1)
 
+def hb_join(conn, group, member, cause):
+    print 'HB join: on group (%s) new member: "%s" joined. Reason: %s' % (group, member, cause)
+def hb_leave(conn, group, member, cause):
+    print 'HB LEAVE: on group (%s) member: "%s" left. Reason: %s' % (group, member, cause)
+def hb_mesg(conn, message):
+    print 'HB message: %s' % (message)
+gcb_hb = GroupCallback(cb_join=hb_join, cb_leave=hb_leave, cb_data=hb_mesg)
+
 listener = CallbackListener(cb_conn=got_conn, cb_dropped=got_dropped, cb_error=got_error)
+listener.set_group_cb(':HB', gcb_hb)
 
 host = 'localhost'
 port = 24999
@@ -45,14 +54,15 @@ sp1 = AsyncSpread(myname1, host, port, listener=listener, start_connect=True)
 sp2 = AsyncSpread(myname2, host, port, listener=listener, start_connect=True, map=sp1.map())
 print 'SP1 is:', sp1
 print 'SP2 is:', sp2
-sp1.run(1, 1)
+sp1.run(10)
 loop=0
 while loop < 1000: # sp1.connected or sp2.connected:
     print 'client top of loop'
     loop += 1
     try:
-        sp1.multicast([':Log'], 'sp1: my multicast num %d' % (loop), 0)
+        sp1.multicast([':HB'], 'sp1: my multicast num %d' % (loop), 0)
         sp2.multicast([':Disc'], 'sp2: SECOND connection: multicast num %d' % (loop), 0)
     except:
         print 'Cannot send message... Not connected?'
-    sp1.run(timeout=1, count=2)
+    sp1.run(1)
+    sp2.run(1)

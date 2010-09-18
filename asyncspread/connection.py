@@ -241,7 +241,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.poll(timeout)
         self._set_context_callback(False)
 
-    def run(self, timeout=0.1, count=None):
+    def run(self, count=None, timeout=0.1):
         '''spend more time than C{poll()} doing IO on the connection'''
         main_loop = 0
         self.logger.debug('run(): <%s> run() Timeout is: %s, COUNT is:%s' % (self.name, timeout, count)) # TODO: remove

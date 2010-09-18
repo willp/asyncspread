@@ -71,4 +71,4 @@ while loop < 1000: # sp1.connected or sp2.connected:
     except:
         print 'Cannot send message... Not connected?'
     sp1.run(1)
-    sp2.run(1)
+    #sp2.run(1)

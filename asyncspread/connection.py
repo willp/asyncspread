@@ -455,7 +455,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.wait_bytes(48, self.st_read_header)
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
         self.logger.info('My private session name for this connection is: "%s"' % (self.session_name))
-        self.session_up.set() # hmm, set session_up BEFORE or AFTER calling listener's handle_connected() method?
+        self.session_up.set()
         self.listener._process_connected(self)
 
     def st_read_header(self, data):

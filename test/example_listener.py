@@ -33,10 +33,6 @@ def got_error(listener, conn, exc):
     if 'Connection refused' in exc:
         print 'Connection refused by server... Sleeping 1 seconds...'
         time.sleep(1)
-    if 'REJECT_' in str(exc):
-        print '%s Got a rejected connection because my name is not unique... Retrying' % (conn.name)
-        conn.name = 'Retry:%3d' % (int(time.time() * 100) % 1000)
-        conn.start_connect()
 
 listener = CallbackListener(cb_conn=got_conn, cb_data=got_data, cb_dropped=got_dropped, cb_error=got_error)
 
@@ -47,9 +43,10 @@ if len(sys.argv) > 1:
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
 sp1 = AsyncSpread(myname1, host, port, listener=listener, start_connect=True)
-sp2 = AsyncSpread(myname1, host, port, listener=listener, start_connect=True, map=sp1.map())
+sp2 = AsyncSpread(myname2, host, port, listener=listener, start_connect=True, map=sp1.map())
 print 'SP1 is:', sp1
 print 'SP2 is:', sp2
+sp1.run(1, 1)
 loop=0
 while loop < 1000: # sp1.connected or sp2.connected:
     print 'client top of loop'

@@ -56,8 +56,8 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = AsyncSpread(myname1, host, port, listener=listener, start_connect=True)
-sp2 = AsyncSpread(myname2, host, port, listener=listener, start_connect=True, map=sp1.map())
+sp1 = AsyncSpread(myname1, host, port, listener=listener1, start_connect=True)
+sp2 = AsyncSpread(myname2, host, port, listener=listener2, start_connect=True, map=sp1.map())
 print 'SP1 is:', sp1
 print 'SP2 is:', sp2
 sp1.run(10)

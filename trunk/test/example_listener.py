@@ -66,9 +66,9 @@ while loop < 1000: # sp1.connected or sp2.connected:
     print 'client top of loop'
     loop += 1
     try:
-        sp1.multicast([':HB'], 'sp1: my multicast num %d' % (loop), 0)
+        sp1.multicast([':HB'], 'PING:sp1,10.0.0.1,%d' % (loop), 0)
         sp2.multicast([':Disc'], 'sp2: SECOND connection: multicast num %d' % (loop), 0)
     except:
         print 'Cannot send message... Not connected?'
-    sp1.run(1)
+    sp1.run(10)
     #sp2.run(1)

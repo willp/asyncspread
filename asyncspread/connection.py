@@ -159,9 +159,12 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         if start_connect:
             self.start_connect()
 
+    def map(self):
+        return self.my_map
+
     def __str__(self): # TODO: remove self.dead and self.shutdown from this!
-        return '<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s", d/s=%s/%s' % (self.__class__,
-                                                                                                self.name, self.connected, self.host, self.port, self.session_name, self.dead, self.shutdown)
+        return ('<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s", d/s=%s/%s' % (self.__class__,
+                    self.name, self.connected, self.host, self.port, self.session_name, self.dead, self.shutdown))
 
     def _do_connect(self):
         '''perform socket C{connect()} to server'''

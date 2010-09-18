@@ -277,7 +277,7 @@ class CallbackListener(SpreadListener):
 
     There is some risk of this code being very boilerplate.  Oh well.  It's helper code.
     '''
-    def __init__(self, cb_conn=None, cb_data=None, cb_dropped=None, cb_error=None):
+    def __init__(self, cb_conn=None, cb_data=None, cb_dropped=None, cb_error=None, cb_unk_group=None):
         '''Creates a new callback listener.
 
         @param cb_conn: callback to be invoked as cb_conn(listener, conn) when the session is authenticated and so is officially connected
@@ -290,6 +290,7 @@ class CallbackListener(SpreadListener):
         self.cb_data = cb_data
         self.cb_dropped = cb_dropped
         self.cb_error = cb_error
+        self.cb_unk_group = cb_unk_group
         self.cb_groups = dict()
 
     def set_group_cb(self, group, group_callback):
@@ -316,6 +317,12 @@ class CallbackListener(SpreadListener):
         if self.cb_error:
             self.cb_error(self, conn, exc)
 
+    def _safe_cb(self, cb, args):
+        try:
+            cb(*args)
+        except:
+            print_tb(self.logger, 'GroupCallbackListener._safe_cb(%s)' % (cb)) # logs traceback
+
     # this function avoids a lot of boilerplate here, should also catch exceptions perhaps
     def _invoke_cb(self, group, callback, args):
         gcb = self.cb_groups.get(group, None)
@@ -328,11 +335,16 @@ class CallbackListener(SpreadListener):
                     print_tb(self.logger, 'GroupCallbackListener._invoke_cb(%s on group %s)' % (callback, group)) # logs traceback
 
     def handle_data(self, conn, message):
+        args = (self, conn, message)
         if self.cb_data:
-            self.cb_data(self, conn, message)
+            self._safe_cb(self.cb_data, args)
         groups = message.groups
+        found_group = False
         for group in groups:
+            found_group = True
             self._invoke_cb(group, 'cb_data', (conn, message))
+        if self.cb_unk_group and not found_group:
+            self._safe_cb(self.cb_unk_group, args)
 
     def handle_group_start(self, conn, group, membership):
         self._invoke_cb(group, 'cb_start', (conn, group, membership))

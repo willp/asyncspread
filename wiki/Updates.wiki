@@ -2,6 +2,31 @@
 
 = Latest News =
 
+=== September 19, 2010 ===
+
+I'm back on the code now, after a long international trip in August.  In the last day, I rounded out the GroupCallbackListener a bit, by adding a callback for receiving a message for a group that has no callback handler.  That should be an interesting use case for someone, I think.  I also added a method to the base AsyncSpread class to return the client's private map dict() variable.  This will make it easier to share a single map() instance among multiple clients, without having to explicitly create the dict() in client side code.
+
+I'm starting on sample code in the test/ directory, including example_listener.py which I will probably rename to something like example_groupcallback.py to be more clear.  I'm using my code as a user now, so it's interesting to see the challenges I've made for people with this API design.  One thing that I think is really annoying is the exception throwing when a connection is down and you want to send a multicast or unicast message to it.  It's somewhat obnoxious to have to wrap every message send and join with a try/except, so I'm thinking of how I can make it easier for users without making the API so flexible that it is overwhelmingly confusing.
+
+For now, I'm going to ignore the threaded version of the class and focus on nailing down the non-threaded version.  It's disappointing that I've gotten so far but still have some fundamental design problems in dealing with reentrance and thread safety.  I want to get to an actual release first with the non-threaded API.  It's still asynchronous and non-blocking, so it works fine for anyone who needs that kind of API.  I should make a client-threaded example that does all the threaded interaction via 2 Queues and a worker thread that sits on run().  Then it's clear how to use the code in a threaded context safely.
+
+I have a few to-do items before I can get to the next version release.  I have to:
+* rewrite the SpreadException code, it's non-pythonic
+* add unit tests with no external (spread daemon) dependencies
+* write docstrings for everything, and generate epydoc for the API
+* write example programs for:
+** Heartbeat channel
+** Log channel with consumers
+** Ping test channel
+** shared dbus channel? one way or two way?
+** Distributed worker channel: worker computed from membership list (failover?)
+** Plugging in a serializer for payload (protocol buffers?)
+
+So, there's still a lot of work ahead.  
+
+
+
+
 === July 17, 2010 ===
 
 After a bout of food poisoning and a minor earthquake in Washington, DC, and a long work-week, I'm back on the code.  I took some time to look at all the junky print statements that were cluttering up the code, and went through and did a big cleanup to replace all the junk I want to keep with calls to the standard logging module's debug/info/warning/critical() methods.  I still have many print statements left, but they only will live while I continue to debug and restructure the code while I make the threaded version work.

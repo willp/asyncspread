@@ -11,16 +11,16 @@ I'm starting on sample code in the test/ directory, including example_listener.p
 For now, I'm going to ignore the threaded version of the class and focus on nailing down the non-threaded version.  It's disappointing that I've gotten so far but still have some fundamental design problems in dealing with reentrance and thread safety.  I want to get to an actual release first with the non-threaded API.  It's still asynchronous and non-blocking, so it works fine for anyone who needs that kind of API.  I should make a client-threaded example that does all the threaded interaction via 2 Queues and a worker thread that sits on run().  Then it's clear how to use the code in a threaded context safely.
 
 I have a few to-do items before I can get to the next version release.  I have to:
-* rewrite the SpreadException code, it's non-pythonic
-* add unit tests with no external (spread daemon) dependencies
-* write docstrings for everything, and generate epydoc for the API
-* write example programs for:
-** Heartbeat channel
-** Log channel with consumers
-** Ping test channel
-** shared dbus channel? one way or two way?
-** Distributed worker channel: worker computed from membership list (failover?)
-** Plugging in a serializer for payload (protocol buffers?)
+  * rewrite the SpreadException code, it's non-pythonic
+  * add unit tests with no external (spread daemon) dependencies
+  * write docstrings for everything, and generate epydoc for the API
+  * write example programs for:
+    * Heartbeat channel
+    * Log channel with consumers
+    * Ping test channel
+    * shared dbus channel? one way or two way?
+    * Distributed worker channel: worker computed from membership list (failover?)
+    * Plugging in a serializer for payload (protocol buffers?)
 
 So, there's still a lot of work ahead.  
 

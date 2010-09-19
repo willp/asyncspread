@@ -307,7 +307,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         exception occurs in an IO handler.'''
         (exc_type, exc_val, tback) = sys.exc_info()
         print_tb(self.logger, 'handle_error()')
-        self.last_drop = time.time()
+        #self.last_drop = time.time()
         if self.session_up.isSet():
             self.logger.debug('handle_error(): THIS WAS A LOST CONNECTION, session_up is set/true.') # TODO: remove?
         else:
@@ -613,6 +613,7 @@ class AsyncSpreadThreaded(AsyncSpread):
     reconnect_delay = 3
 
     def __init__(self, *args, **kwargs):
+        raise NotImplementedError('Threaded subclass of AsyncSpread is not yet ready to use, sorry.') # TODO: finish me
         kwargs['map'] = dict() # ensure all instances get their own distinct map object, to prevent asyncore from exploding
         self.my_map = kwargs['map']
         # pull start_connect param out, and be sure superclass sees it as False, to avoid non-threaded

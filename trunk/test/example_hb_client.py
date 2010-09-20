@@ -11,7 +11,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.DEBUG)
+setup_logging(logging.INFO)
 myname = 'HBcli-%03d' % (int(time.time()*100) % 1000)
 print 'I am', myname
 

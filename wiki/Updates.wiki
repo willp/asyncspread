@@ -2,6 +2,24 @@
 
 = Latest News =
 
+=== September 21, 2010 ===
+
+I just made some updates to the example heartbeat server/client applications.  I finally took a few moments to implement something I've been dying to implement: a form of one to many RPC with a single responder.  It works like this:
+
+  * Multiple listeners join a common server channel
+  * A client sends a single request to the channel (without joining it)
+  * Each server computes a hash based on:
+  ** The number of listeners
+  ** The position of itself within that list
+  ** The hash of the sender's name with the number of listening servers
+  ** The hash is taken modulus the number of servers
+  * If the modulus of the hash is equal to the position within the list, then that server is the only responder
+
+It's self balancing with a uniform distribution and ends up being really scalable.  The code is only 7 lines of python, using the crc32() method of the binascii module to compute the hash value.
+
+It has some very nice RPC properties, as well.  When the list of servers (listeners) doesn't change, a single client will always get responses from the same server.  This enhances cache-locality.  Unfortunately, every time a server joins or leaves the group, the client to server mapping is scrambled, so cache-locality shouldn't be counted upon for scaling.  Another great property is that the servers don't have any dependencies on one another, so you can stand up more servers without incurring any additional load on the rest of the servers.  This provides true uniform scalability.  There is an additional cost within spread, but for now I want to assume that the cost of sending a message is insignificant compared to the cost of performing some kind of work for the request.  Another nice property is that when a server leaves and rejoins the group, the original client to server assignments are restored to their previous state.  This means you can bounce a server, and as long as the server is down for only a small time, you don't incur a large cost for breaking cache-locality.  Another advantage is that it is completely decentralized.  Because spread is decentralized, and this distribution algorithm is decentralized, it means there is no single point of failure anywhere in the system.  Very satisfying.
+
+
 === September 20, 2010 ===
 
 I've uploaded a new version, 0.1.4a to the Downloads page.  This version contains a few minor fixes and adds a little more functionality to the GroupCallbackListener.  The changes are what I describe in the Sept 19 update (below).

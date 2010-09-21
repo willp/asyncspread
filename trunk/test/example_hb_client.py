@@ -42,7 +42,7 @@ while loop < 10000:
     print '%s: client top of loop %d' % (myname, loop)
     loop += 1
     hb_client.run(10)
-    if loop % 5 == 3:
+    if loop % 3 == 1:
         try:
             hb_client.multicast([':HB'], 'heartbeat ping from client', loop // 10)
         except: print 'cannot send, not connected?'

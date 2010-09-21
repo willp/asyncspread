@@ -13,48 +13,84 @@ def setup_logging(level=logging.INFO):
 
 setup_logging(logging.INFO)
 
+import binascii
+
 class HeartbeatServer(SpreadListener):
-    def __init__(self, name):
+    def __init__(self):
         SpreadListener.__init__(self)
-        self.name = name
-        self.hb_count = 0
-        print 'I am', myname
+        self.hb_count = self.hb_sent = 0
+        self.name = 'HBsrv-%03d' % (int(time.time()*100) % 1000)
+        print 'I am', self.name
 
     def handle_connected(self, conn):
         print 'Got connected:', conn, '\nJoining the :HB channel...'
         conn.join(':HB')
+
     def handle_dropped(self, conn):
         print 'Lost connection to spread server on:', conn.name, 'Reconnecting with start_connect()'
         conn.start_connect()
+
     def handle_error(self, conn, exc):
         print 'Got exception/error:', str(exc)
         if 'Connection refused' in exc:
-            print 'Connection refused by server... Sleeping 1 seconds...'
+            print 'Connection refused by server... Sleeping 1 second before reconnect'
             time.sleep(1)
+
+    def compute_responder(self, sender, conn):
+        '''Method to compute a subset of responders based on the group membership and
+        sender's name, to calculate a single responder based on hashing the sender's name
+        with the current count of the number of servers listening, taking it modulus the number
+        of servers and comparing it to my position in the list of servers on the channel.  Only one
+        server will respond with this math.  Computing the position could be cached and
+        updated whenever there are membership changes, but for now it's done every time because
+        this is sample code.'''
+        members = list(self.get_group_members(':HB'))
+        num_servers = len(members)
+        members.sort() # we need a stable ordering
+        position = members.index(conn.session_name)
+        c_str = '%d:%s' % (num_servers, sender)
+        hash_mod = binascii.crc32(c_str) % num_servers
+        ok = (hash_mod == position)
+        return ok
+
+    def handle_group_start(self, conn, group, membership):
+        print 'Joined the group (%s).  Current # of HB servers: %d' % (group, len(membership))
+        print 'Current members:', membership
+
     def handle_group_join(self, conn, group, member, cause):
-        print 'Another HB server joined: "%s" joined. Reason: %s' % (member, cause)
+        print 'Another HB server joined group %s: "%s" joined. Reason: %s' % (group, member, cause)
+        print 'Total HB servers listening:', len(self.get_group_members(group))
+
     def handle_group_leave(self, conn, group, member, cause):
-        print 'A HB server LEFT: "%s" left. Reason: %s' % (member, cause)
+        print 'A HB server LEFT: "%s" left group %s. Reason: %s' % (member, group, cause)
+        print 'Total HB servers listening:', len(self.get_group_members(group))
+
     def handle_data(self, conn, message):
         self.hb_count += 1
         sender = message.sender
         data = message.data
         mtype = message.mesg_type
+        reply = self.compute_responder(sender, conn)
         print '%s>> HB message, type=%d, sender="%s", message: %s' % (conn.name, mtype, sender, data)
         # and send a response back
-        conn.unicast(sender, 'HB Reply:: %d received' % (self.hb_count), mtype)
+        if reply:
+            self.hb_sent += 1
+            print '%s>> sending reply!' % (conn.name)
+            try:
+                conn.unicast(sender, 'HB Reply:: %d received, %d sent' % (self.hb_count, self.hb_sent), mtype+1)
+            except:
+                print 'Lost connection when attempting to reply.  Oh well.'
 
-myname = 'HBsrv-%03d' % (int(time.time()*100) % 1000)
-hb_listener = HeartbeatServer(myname)
+hb_listener = HeartbeatServer()
 
 (host, port) = ('localhost', 24999)
 if len(sys.argv) > 1: host = sys.argv[1]
 if len(sys.argv) > 2: port = int(sys.argv[2])
-hbs = AsyncSpread(myname, host, port, listener=hb_listener, start_connect=True)
+hbs = AsyncSpread(hb_listener.name, host, port, listener=hb_listener, start_connect=True)
 print 'hbs is:', hbs
 
 loop=0
 while loop < 10000:
-    print '%s: client top of loop %d' % (myname, loop)
+    print '%s: server top of loop %d' % (hb_listener.name, loop)
     loop += 1
     hbs.run(10)

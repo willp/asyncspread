@@ -90,8 +90,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     * and much more!
     ''' # docstring used by setup.py
-    def __init__(self, name, host, port,
-                 listener=None,
+    def __init__(self, name, host, port, listener,
                  membership_notifications=True,
                  priority_high=False,
                  timer_interval=1.0,
@@ -106,14 +105,22 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         @type host: str
         @param port: TCP port number for spread daemon
         @type port: int
+        @param listener: message and membership event listener object
+        @type listener: SpreadListener or subclass
         @param membership_notifications: tells Spread to provide group membership (presence) notifications, leave True for most uses
         @type membership_notifications: bool
-        @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True.
+        @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True, leave True
         @type priority_high: bool
         @param timer_interval: number of seconds between invocations to handle_timer() on listener
         @type timer_interval: float
         @param keepalive: enable or disable TCP_KEEPALIVE on the socket, strongly recommended you leave this ENABLED
         @type keepalive: bool
+        @param start_connect: enable to open the connection within the constructor, or later call C{start_connect()}
+        @type start_connect: bool
+        @param map: Socket container for asyncore/asynchat to use for shared IO select/poll operations.  If set to None, a
+        new dict() will be created for each instance, requiring you call C{run()} on each instance independently.  You may also
+        set this parameter to the value of another instance's map by using that instance's C{map()} method to return its socket map.
+        @type map: dict
         '''
         if map is not None:
             self.my_map = map
@@ -296,6 +303,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.listener._process_dropped(self)
 
     def handle_expt(self):
+        '''Invoked by asyncore when an exception is thrown within a handler or the asyncore code itself'''
         self.logger.warning('handle_expt(): exception handled') # TODO: turn into logging? or trim and let print_tb handle this?
         (exc_type, exc_val, tback) = sys.exc_info()
         print_tb(self.logger, 'handle_expt()')

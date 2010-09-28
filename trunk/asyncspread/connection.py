@@ -95,9 +95,10 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
                  keepalive=True,
                  start_connect=False,
                  map=None):
-        '''Asynchronous connection to a spread daemon, non-threaded, based on asyncore.asynchat
+        '''Asynchronous connection to a Spread daemon, non-threaded, based on asyncore.asynchat.
 
-        @param name: your unique self-identifier, no more than 10 characters long, unique to this server
+        @param name: your unique self-identifier, no more than 10 characters long, unique to this server.  If set to '', the server
+        will assign a unique identifier to your client (usually something like r123-231 or similar.)
         @type name: str
         @param host: Spread server hostname (fully qualified domain name)
         @type host: str
@@ -109,15 +110,15 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         @type membership_notifications: bool
         @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True, leave True
         @type priority_high: bool
-        @param timer_interval: number of seconds between invocations to handle_timer() on listener
+        @param timer_interval: number of seconds between invocations to L{handle_timer()} on listener
         @type timer_interval: float
         @param keepalive: enable or disable TCP_KEEPALIVE on the socket, strongly recommended you leave this ENABLED
         @type keepalive: bool
-        @param start_connect: enable to open the connection within the constructor, or later call C{start_connect()}
+        @param start_connect: enable to open the connection within the constructor, or later call L{start_connect()}
         @type start_connect: bool
         @param map: Socket container for asyncore/asynchat to use for shared IO select/poll operations.  If set to None, a
-        new dict() will be created for each instance, requiring you call C{run()} on each instance independently.  You may also
-        set this parameter to the value of another instance's map by using that instance's C{map()} method to return its socket map.
+        new C{dict()} will be created for each instance, requiring you call L{run()} on each instance independently.  You may also
+        set this parameter to the value of another instance's map by using that instance's L{map()} method to return its socket map.
         @type map: dict
         '''
         if map is not None:
@@ -172,7 +173,9 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
                     self.name, self.connected, self.host, self.port, self.session_name, self.dead, self.shutdown))
 
     def is_connected(self):
-        '''test the session_up Event() object to see if it is set() or not'''
+        '''Return the connected state of the Spread session.
+        This tests the session_up Event() object to see if it is set() or not.
+        '''
         return self.session_up.isSet()
 
     def start_connect(self, timeout=10):
@@ -214,11 +217,11 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
             self.listener._process_timer(self)
 
     def run(self, count=None, timeout=0.1):
-        '''Spend some time doing IO on the connection, (wraps C{poll()} in a loop)
+        '''Spend some time doing IO on the connection, (wraps L{poll} in a loop)
 
-        @param count: number of times to invoke C{poll()}, or None to loop forever
+        @param count: number of times to invoke L{poll}, or None to loop forever
         @type count: int
-        @param timeout: the IO timeout for C{poll()}
+        @param timeout: the IO timeout for L{poll}
         @type timeout: float
         '''
         main_loop = 0
@@ -314,14 +317,14 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     def set_level(self, level):
         '''Change the default message delivery guarantee level for Spread to enforce.  The C{level}
-        parameter corresponds to the _MESS service levels as defined in C{services.ServiceTypes}.  The
+        parameter corresponds to the _MESS service levels as defined in L{ServiceTypes}.  The
         default service level type is ServiceTypes.AGREED_MESS.
 
         These service levels are defined in: http://www.spread.org/docs/spread_docs_4/docs/message_types.html
 
-        Note, this is delegated to the internal L{SpreadProto} C{set_level} method.
+        Note, this is delegated to the internal L{SpreadProto.set_level} method.
 
-        @param level: one of, ServiceTypes.RELIABLE_MESS, ServiceTypes.UNRELIABLE_MESS,
+        @param level: one of: L{ServiceTypes}.RELIABLE_MESS, ServiceTypes.UNRELIABLE_MESS,
         ServiceTypes.FIFO_MESS, ServiceTypes.CAUSAL_MESS, ServiceTypes.AGREED_MESS,
         ServiceTypes.SAFE_MESS from the C{ServiceTypes} class in the C{asyncspread.services}
         module.

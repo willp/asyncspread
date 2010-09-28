@@ -37,7 +37,7 @@ class HeartbeatServer(SpreadListener):
             time.sleep(1)
 
     def compute_responder(self, sender, conn):
-        '''Method to compute a subset of responders based on the group membership and
+        '''Method to compute a subset of responders based on the current group membership and
         sender's name, to calculate a single responder based on hashing the sender's name
         with the current count of the number of servers listening, taking it modulus the number
         of servers and comparing it to my position in the list of servers on the channel.  Only one

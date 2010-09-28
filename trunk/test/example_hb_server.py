@@ -48,8 +48,7 @@ class HeartbeatServer(SpreadListener):
         num_servers = len(members)
         members.sort() # we need a stable ordering
         position = members.index(conn.session_name)
-        c_str = '%d:%s' % (num_servers, sender)
-        hash_mod = binascii.crc32(c_str) % num_servers
+        hash_mod = binascii.crc32(sender) % num_servers
         ok = (hash_mod == position)
         return ok
 

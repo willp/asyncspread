@@ -12,7 +12,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.INFO)
+setup_logging(logging.DEBUG)
 myname = 'HBcli-%03d' % (int(time.time()*100) % 1000)
 print 'I am', myname
 
@@ -44,7 +44,11 @@ while loop < 10000:
     print '%s: client top of loop %d' % (myname, loop)
     loop += 1
     hb_client.run(10)
-    if loop % 3 == 1:
+    if loop % 3 == 0:
         try:
             hb_client.multicast([':HB'], 'heartbeat ping from client', loop // 10)
         except: print 'cannot send, not connected?'
+    if not hb_client.is_connected():
+        print 'Reconnecting!'
+        hb_client.disconnect()
+        hb_client.start_connect()

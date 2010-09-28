@@ -55,7 +55,7 @@ class SpreadProto(object):
     def __init__(self):
         self.set_level()
 
-    def set_level(self, default_type=ServiceTypes.SAFE_MESS):
+    def set_level(self, default_type=ServiceTypes.AGREED_MESS):
         self.default_type = default_type
         self.send_pkt = struct.pack('!I', default_type)
         self.send_pkt_selfdisc = struct.pack('!I', default_type | ServiceTypes.SELF_DISCARD)

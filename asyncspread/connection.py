@@ -76,8 +76,6 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
     * asynchronous client API to Spread 4.x message broker, built using only python standard
     library modules, including asyncore
 
-    * non-threaded and threaded support, up to the user's choice
-
     * messaging API supporting multicast (one:many) and unicast (one:one) style messaging among clients
 
     * flexible API for receiving messages and notifications, based on a SpreadListener class that may be
@@ -173,19 +171,23 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         return ('<%s>: name="%s", connected=%s, server="%s:%d", session_name="%s", d/s=%s/%s' % (self.__class__,
                     self.name, self.connected, self.host, self.port, self.session_name, self.dead, self.shutdown))
 
+    def _set_keepalive(self):
+        sock = self.socket
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) # enable
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPIDLE, self.keepalive_idle)
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPINTVL, self.keepalive_idle)
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPCNT, self.keepalive_maxdrop)
+        except:
+            self.logger.warning('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
+            self.keepalive = False
+
     def _do_connect(self):
         '''perform socket C{connect()} to server'''
         self.do_restart.clear()
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         if self.keepalive:
-            try:
-                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) # enable
-                self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPIDLE, self.keepalive_idle)
-                self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPINTVL, self.keepalive_idle)
-                self.socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPCNT, self.keepalive_maxdrop)
-            except:
-                self.logger.warning('Failed setting TCP KEEPALVIE on socket. Firewall issues may cause connection to silently become a black hole.')
-                self.keepalive = False
+            self._set_keepalive()
         self.dead = False
         self.logger.debug('_do_connect(): <%s> issuing connect()' % (self.name)) # TODO: remove
         self.connect((self.host, self.port))
@@ -236,7 +238,13 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         return self.is_connected()
 
     def poll(self, timeout=0.001, count=1):
-        '''spend time on the socket layer (C{asyncore.loop}), looking for IO, invoking IO handlers'''
+        '''spend time on the socket layer (C{asyncore.loop}), looking for IO, invoking IO handlers.
+        Also, test to see if our timer has expired, and if so, execute the timer callback.
+
+        @param timeout: the timeout to pass to C{asyncore.loop()}, used for poll() or select()ing on the socket
+        @type timeout: float
+        @param count: the count to pass to the C{asyncore.loop()}, to loop the polling
+        @type count: int'''
         asyncore.loop(timeout=timeout, count=count, use_poll=True, map=self.my_map)
         if self._is_timer():
             self.listener._process_timer(self)
@@ -272,11 +280,15 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
             delay = self.timer_interval
         self.timer_next = time.time() + delay
 
+    def _stop_timer(self):
+        '''halt the timer from going off again'''
+        self.timer_next = None
+
     def _is_timer(self):
-        '''method to check the timer and either return C{True} (and reset the timer) or return
+        '''check the timer and either return C{True} (and reset the timer) or return
         C{False} if the timer isn't due yet.'''
         now = time.time()
-        if now >= self.timer_next:
+        if self.timer_next is not None and now >= self.timer_next:
             self._reset_timer()
             return True
         return False
@@ -315,7 +327,6 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         exception occurs in an IO handler.'''
         (exc_type, exc_val, tback) = sys.exc_info()
         print_tb(self.logger, 'handle_error()')
-        #self.last_drop = time.time()
         if self.session_up.isSet():
             self.logger.debug('handle_error(): THIS WAS A LOST CONNECTION, session_up is set/true.') # TODO: remove?
         else:
@@ -473,8 +484,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         the payload (mesg_len).  If the number of groups is > 0 (usually it is), then the next state reads
         the length prefixed list of destination groups.  Otherwise, the message payload is read.
 
-        TODO: handle endianness differences properly here.
-        '''
+        TODO: handle endianness differences properly here.'''
         self.logger.debug('STATE: st_read_header')
         (svc_type, sender, num_groups, mesg_type, mesg_len) = self.unpack_header(data)
         # TODO: add code to flip endianness of svc_type and mesg_type if necessary (independently?)
@@ -533,7 +543,10 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     def join(self, group):
         '''join a group, by sending the JOIN request to the server.  If the connection is not up or has failed,
-        this method will raise a SpreadException.  If this method returns, it always returns True.'''
+        this method will raise a SpreadException.  If this method returns, it always returns True.
+
+        @param group: the name of the group to join
+        @type group: str'''
         if not self.is_connected():
             self.logger.critical('Not connected to spread. Cannot join group "%s"' % (group))
             raise SpreadException('not connected') # not connected
@@ -543,7 +556,11 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     def leave(self, group):
         '''leave a group, by sending the LEAVE request to the server.  If the connection is not up or has failed,
-        this method will return False.  Otherwise, it returns True.'''
+        this method will return False.  Otherwise, it returns True
+
+        @param group: the name of the group to leave
+        @type group: str
+        '''
         if not self.is_connected():
             self.logger.critical('No session established with server... Failed leave() message')
             return False
@@ -556,7 +573,10 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     def disconnect(self, shutdown=False):
         '''gracefully disconnect from the server, by sending a KILL (self) request to the server.  If the connection
-        is not up, or has already been closed, this method returns False.  Otherwise it returns True.'''
+        is not up, or has already been closed, this method returns False.  Otherwise it returns True
+
+        @param shutdown: set this to disable any reconnect logic
+        @type shutdown: bool'''
         if not self.is_connected():
             return False # is we're not connected, just return False instead of raising an exception
         who = self.session_name
@@ -572,7 +592,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         '''Send a message to all members of a group.  If the connection is not up, a SpreadException
         is raised to the caller.  This method returns True (when no exception is raised).
 
-        @param groups: group list (string)
+        @param groups: group list (strings) to send messages to
         @type groups: list
         @param message: data payload
         @type message: string

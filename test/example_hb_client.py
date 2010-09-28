@@ -2,6 +2,7 @@
 import time, sys, logging
 sys.path.append('.')
 from asyncspread.connection import AsyncSpread
+from asyncspread.services import ServiceTypes
 from asyncspread.listeners import CallbackListener, GroupCallback
 
 def setup_logging(level=logging.INFO):
@@ -36,6 +37,7 @@ def got_mesg(listener, conn, mesg):
 listener = CallbackListener(cb_conn=got_conn, cb_dropped=got_dropped, cb_error=got_error, cb_data=got_mesg)
 
 hb_client = AsyncSpread(myname, host, port, listener=listener, start_connect=True)
+hb_client.set_level(ServiceTypes.AGREED_MESS)
 
 loop=0
 while loop < 10000:

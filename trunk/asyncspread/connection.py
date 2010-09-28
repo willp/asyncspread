@@ -658,17 +658,17 @@ class AsyncSpreadThreaded(AsyncSpread):
     you to implement your own IO thread (since asyncore/asynchat is not thread-safe itself.
 
     Typical implementation will be:
-    - user threads invoke various methods to initiate a connect, join, leave, multicast, unicast, disconnect, etc
-    - blocking methods (like connect) will let user specify a timeout
-    - all other methods operate only on a queue that the IO thread will process
-    - ONLY the IO thread runs asyncore.loop()
-    -- therefore, ONLY the IO thread runs in the st_* methods for processing the protocol
-    -- also,client callbacks can only invoke threadsafe calls.
-    - ALL user callbacks will be invoked by a separate thread (perhaps this happens in a run() method? so the
+      - user threads invoke various methods to initiate a connect, join, leave, multicast, unicast, disconnect, etc
+      - blocking methods (like connect) will let user specify a timeout
+      - all other methods operate only on a queue that the IO thread will process
+      - ONLY the IO thread runs asyncore.loop()
+      -- therefore, ONLY the IO thread runs in the st_* methods for processing the protocol
+      -- also,client callbacks can only invoke threadsafe calls.
+      - ALL user callbacks will be invoked by a separate thread (perhaps this happens in a run() method? so the
     user's invoking thread is used as the response thread.  could keep things pretty stable.)
-    - IO thread is daemonic
-    - exceptions are only raised to the user thread
-    - IO thread runs all the time
+      - IO thread is daemonic
+      - exceptions are only raised to the user thread
+      - IO thread runs all the time
     '''
     reconnect_delay = 3
 

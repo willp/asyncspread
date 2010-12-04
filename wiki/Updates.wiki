@@ -2,6 +2,10 @@
 
 = Latest News =
 
+=== December 4, 2010 ===
+
+The project isn't dead!  I'm back from a vacation to Venice, Italy and will try to make the first 1.0 release before the end of this year.  It will be difficult, but I think it's doable.
+
 === September 21, 2010 ===
 
 I just made some updates to the example heartbeat server/client applications.  I finally took a few moments to implement something I've been dying to implement: a form of one to many RPC with a single responder.  It works like this:

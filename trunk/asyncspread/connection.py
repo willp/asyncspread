@@ -108,7 +108,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         @type listener: SpreadListener or subclass
         @param membership_notifications: tells Spread to provide group membership (presence) notifications, leave True for most uses
         @type membership_notifications: bool
-        @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True, leave True
+        @param priority_high: undocumented boolean for Spread session protocol. Does not speed anything up if set to True, leave False
         @type priority_high: bool
         @param timer_interval: number of seconds between invocations to L{handle_timer()} on listener
         @type timer_interval: float

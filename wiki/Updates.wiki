@@ -2,6 +2,10 @@
 
 = Latest News =
 
+=== December 31, 2010 ===
+
+Happy new year!  My 2011 resolution is to get the code done with a beta release in January and a production release no later than February and a PYPI release at that time.
+
 === December 4, 2010 ===
 
 The project isn't dead!  I'm back from a vacation to Venice, Italy and will try to make the first 1.0 release before the end of this year.  It will be difficult, but I think it's doable.

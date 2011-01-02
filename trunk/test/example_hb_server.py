@@ -68,7 +68,7 @@ class HeartbeatServer(SpreadListener):
 
     def handle_data(self, conn, message):
         self.hb_count += 1
-        sender = message.sender
+        sender = str(message.sender)
         data = message.data
         mtype = message.mesg_type
         reply = self.compute_responder(sender, conn)

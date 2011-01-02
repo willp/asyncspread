@@ -1,6 +1,6 @@
 '''Spread Listeners are implemented here'''
 import time, logging, threading, traceback, sys
-from message import *
+from asyncspread.message import *
 
 def print_tb(logger, who):
         (exc_type, exc_val, tback) = sys.exc_info()
@@ -37,7 +37,8 @@ class SpreadListener(object):
             return
         new_membership = set(message.members)
         # new group!
-        if not self.groups.has_key(group):
+        #if not self.groups.has_key(group):
+        if not group in self.groups:
             self.groups[group] = new_membership
             try:
                 self.handle_group_start(conn, group, new_membership)
@@ -224,7 +225,11 @@ class SpreadPingListener(SpreadListener):
         timeouts = []
         now = time.time()
         if self.ping_lock.acquire(): # always true, block, get the lock...
-            for ping_id, cb_items in self.ping_callbacks.iteritems():
+            try:
+                dict_iter = self.ping_callbacks.iteritems
+            except:
+                dict_iter = self.ping_callbacks.items
+            for ping_id, cb_items in dict_iter():
                 (timer_cb, time_sent, timeout) = cb_items
                 expire = time_sent + timeout
                 if now >= expire:
@@ -381,7 +386,7 @@ class CallbackListener(SpreadListener):
         conn.join(group)
         while not joined and time.time() < expire_time:
             conn.run(count=10, timeout=0.1) # should work in threaded and non-threaded code just fine
-            print 'waiting for join to group "%s"' % (group)
+            print (('waiting for join to group "%s"' % group))
             time.sleep(0.1)
         return joined
 

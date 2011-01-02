@@ -1,5 +1,5 @@
 import logging
-from services import ServiceTypes
+from asyncspread.services import ServiceTypes
 
 class SpreadMessage(object):
     def _set_data(self, data):

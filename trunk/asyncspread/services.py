@@ -31,6 +31,11 @@ class ServiceTypes(object):
     CAUSED_BY_DISCONNECT = 0x00000400
     CAUSED_BY_NETWORK = 0x00000800
 
+def _make_group_formats(max_groups, max_group_len=32):
+    group_fmt = '%ds' % max_group_len
+    return [ group_fmt * i for i in range(max_groups) ]
+
+### TODO: Scope problems here in these class-level values.  Python3 won't preserve the locals in the list comprehension for GROUP_FMTS
 class SpreadProto(object):
     MAX_GROUP_LEN = 32
     GROUP_FMT = '%ds' % (MAX_GROUP_LEN)
@@ -42,7 +47,8 @@ class SpreadProto(object):
     # Don't send to more than MAX_GROUPS groups at once, increase if necessary
     MAX_GROUPS = 1000
     # This list will consume 1000*3 = 3 KB, plus overhead.  Worth it to spend the RAM.
-    GROUP_FMTS = [ GROUP_FMT * i for i in xrange(MAX_GROUPS) ]
+    #GROUP_FMTS = [ GROUP_FMT * i for i in range(MAX_GROUPS) ]
+    GROUP_FMTS = _make_group_formats(MAX_GROUPS, MAX_GROUP_LEN)
 
     # Encoded message headers
     JOIN_PKT = struct.pack('!I', ServiceTypes.JOIN)
@@ -65,10 +71,12 @@ class SpreadProto(object):
         #print 'protocol_create(len(service_type)=%d, mesg_type=%s, session_name=%s, group_names=%s, data_len=%d)' % (len(service_type),
         #       mesg_type, session_name, group_names, data_len)
         mesg_type_str = struct.pack('<I', (mesg_type & 0xffff) << 8)
+        session_name = str(session_name)
         msg_hdr = struct.pack('>32sI4sI', session_name, len(group_names), mesg_type_str, data_len)
         grp_tag  = SpreadProto.GROUP_FMTS[len(group_names)] # '32s' * len(gname)
         grp_hdr = struct.pack(grp_tag, *group_names)
-        header = ''.join((service_type, msg_hdr, grp_hdr))
+        #header = ''.join((service_type, msg_hdr, grp_hdr))
+        header = service_type + msg_hdr + grp_hdr
         return header
 
     @staticmethod

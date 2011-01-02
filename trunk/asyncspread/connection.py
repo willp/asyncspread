@@ -2,11 +2,10 @@
 import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback, itertools
 import warnings
 from collections import deque
-from message import *
-from services import *
-from listeners import *
-from expt import *
-
+from asyncspread.message import *
+from asyncspread.services import *
+from asyncspread.listeners import *
+from asyncspread.expt import *
 
 '''This code is released for use under the GNU Public License V3 (GPLv3).
 
@@ -44,8 +43,12 @@ class AsyncChat26(asynchat.async_chat):
         # if python version < 2.6:
         if sys.version_info[0:2] < (2,6):
             # python 2.4 and 2.5 need to do this:
-            self.ac_in_buffer = ''
-            self.ac_out_buffer = ''
+            try:
+                self.ac_in_buffer = bytes('')
+                self.ac_out_buffer = bytes('')
+            except:
+                self.ac_in_buffer = ''
+                self.ac_out_buffer = ''
             self.producer_fifo = asynchat.fifo()
             # and here is the fix, I'm including 'map' to the superclass constructor here:
             asyncore.dispatcher.__init__ (self, conn, map)
@@ -199,7 +202,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
                                         timeout, sleep_delay)) # TODO: remove
             if self.dead or self.shutdown: # maybe dead _is_ shutdown?
                 return False
-            self._do_poll(timeout/100)
+            self._do_poll(timeout * 0.01)
             time.sleep(sleep_delay)
         self.logger.debug ('<%s> wait_for_connection() returning...' % (self.name)) # TODO: remove
         return self.is_connected()
@@ -292,11 +295,15 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
             self.logger.critical('Not connected to spread. Cannot send multicast message to group(s) "%s"' % (groups))
             raise SpreadException('no connection')
         #print 'multicast(groups=%s, message=%s, mesg_type=%d, self_discard=%s)' % (groups, message, mesg_type, self_discard)
+        message = message.encode() # turn into a string if needed
         data_len = len(message)
         svc_type_pkt = self.proto.get_send_pkt(self_discard)
         header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.session_name, groups, data_len)
-        pkt = header + message
-        self._send(pkt)
+        self.logger.critical ('Types of header, message: %s, %s' % (type(header), type(message)))
+        self._send(header)
+        self._send(message)
+        #pkt = header + message
+        #self._send(pkt)
 
     def unicast(self, group, message, mesg_type):
         '''Send a message to a single group or client.  If the connection is not up, a SpreadException
@@ -427,7 +434,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     def _clear_ibuffer(self):
         '''internal: clears internal input buffer and buffer offset'''
-        self._ibuffer = ''
+        self._ibuffer = None # ''
         self._ibuffer_start = 0
 
     def _reset_timer(self, delay=None):
@@ -494,7 +501,10 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     def collect_incoming_data(self, data):
         '''internal: Buffer the data, used by asyncore.asynchat'''
-        self._ibuffer += data
+        if self._ibuffer is None:
+            self._ibuffer = data
+        else:
+            self._ibuffer += data
 
     def found_terminator(self):
         '''internal: invoked by asyncore.asynchat when the terminating condition has been met, which
@@ -531,7 +541,9 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         '''internal protocol state: this method parses the authentication methods string, which is a space delimited list
         usually "NULL " but it may be: "NULL IP" or "IP ".  There is trailing whitespace usually.'''
         self.logger.debug('STATE: st_auth_process')
-        methods = data.rstrip().split(' ') # space delimited?
+        method_str = data.decode()
+        methods = method_str.rstrip().split(' ') # space delimited?
+        self.logger.critical('AUTH METHODS: %s' % (methods))
         if 'NULL' not in methods: # TODO: add 'IP' support at some point
             self.logger.critical('Spread server does not accept our NULL authentication. Server permited methods are: "%s"' % (data))
             self._drop()
@@ -586,7 +598,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         It is usually in the format: '#my_private_name#server_name' where my_private_name is
         supplied by the client, and server_name is the unique name of this spread daemon.'''
         self.logger.debug('STATE: st_set_session')
-        self.session_name = data
+        self.session_name = data.decode('utf-8')
         self.wait_bytes(48, self.st_read_header)
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
         self.logger.info('My private session name for this connection is: "%s"' % (self.session_name))
@@ -601,6 +613,8 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         the length prefixed list of destination groups.  Otherwise, the message payload is read.'''
         self.logger.debug('STATE: st_read_header')
         (svc_type, sender, num_groups, mesg_type, mesg_len) = self.unpack_header(data)
+        sender = sender.decode()
+        self.logger.critical ('SENDER: type=%s  Is:%s' % (type(sender), sender))
         # TODO: add code to flip endianness of svc_type and mesg_type if necessary (independently?)
         endian_test = 0x80000080
         endian_wrong = (svc_type & endian_test) == 0
@@ -635,7 +649,8 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         to the listener.'''
         self.logger.debug('STATE: st_read_groups')
         group_packer = SpreadProto.GROUP_FMTS[self.mfactory.num_groups] # '32s' * len(gname)
-        groups_padded = struct.unpack(group_packer, data)
+        groups_padded_b = struct.unpack(group_packer, data)
+        groups_padded = [ g.decode() for g in groups_padded_b ]
         groups = [ g[0:g.find('\x00')] for g in groups_padded ] # trim out nulls
         factory_mesg = self.mfactory.process_groups(groups)
         mesg_len = self.mfactory.mesg_len

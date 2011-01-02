@@ -68,8 +68,8 @@ class SpreadProto(object):
 
     @staticmethod
     def protocol_create(service_type, mesg_type, session_name, group_names, data_len=0):
-        #print 'protocol_create(len(service_type)=%d, mesg_type=%s, session_name=%s, group_names=%s, data_len=%d)' % (len(service_type),
-        #       mesg_type, session_name, group_names, data_len)
+        #print ('protocol_create(len(service_type)=%d, mesg_type=%s, session_name=%s, group_names=%s, data_len=%d)' % (len(service_type),
+        #       mesg_type, session_name, group_names, data_len))
         mesg_type_str = struct.pack('<I', (mesg_type & 0xffff) << 8)
         session_name = str(session_name)
         msg_hdr = struct.pack('>32sI4sI', session_name, len(group_names), mesg_type_str, data_len)

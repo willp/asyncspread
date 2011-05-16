@@ -1,4 +1,4 @@
-#!/usr/bin/python2.6 -u
+#!/usr/bin/python -u
 import time, sys, logging
 sys.path.append('.')
 from asyncspread.connection import AsyncSpread, AsyncSpreadThreaded
@@ -62,7 +62,7 @@ if len(sys.argv) > 1:
     host = sys.argv[1]
 if len(sys.argv) > 2:
     port = int(sys.argv[2])
-sp1 = AsyncSpreadThreaded(myname, host, port, listener=mylistener2, start_connect=True)
+sp1 = AsyncSpread(myname, host, port, listener=mylistener2, start_connect=True)
 print 'Connecting to %s:%d' % (host, port)
 sp1.set_level(ServiceTypes.UNRELIABLE_MESS)
 ret = sp1.connected

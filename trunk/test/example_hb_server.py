@@ -1,6 +1,7 @@
 #!/usr/bin/env python
+from __future__ import division
 import time, sys, logging, traceback
-sys.path.append('.')
+sys.path.extend(['.', '..'])
 from asyncspread.connection import AsyncSpread
 from asyncspread.listeners import SpreadListener
 
@@ -37,21 +38,27 @@ class HeartbeatServer(SpreadListener):
             time.sleep(1)
 
     def compute_responder(self, sender, conn):
-        '''Method to compute a subset of responders based on the current group membership and
+        '''
+        Method to compute a subset of responders based on the current group membership and
         sender's name, to calculate a single responder based on hashing the sender's name
         with the current count of the number of servers listening, taking it modulus the number
         of servers and comparing it to my position in the list of servers on the channel.  Only one
-        server will respond with this math.  Computing the position could be cached and
-        updated whenever there are membership changes, but for now it's done every time because
-        this is sample code.'''
+        server will respond with this math.
+        
+        Computing the position could be cached and updated whenever there are membership
+        changes, but for now it's done every time because this is sample code.
+        '''
         members = list(self.get_group_members(':HB'))
         num_servers = len(members)
         members.sort() # we need a stable ordering
-        print ('CRAP: %s in? %s' % (conn.session_name, members))
         position = members.index(conn.session_name)
         sender = sender.encode('utf-8')
         hash_mod = binascii.crc32(sender) % num_servers
         ok = (hash_mod == position)
+        if ok:
+            print ('I REPLY TO %s  (%d/%d)' % (sender, hash_mod, position))
+        else:
+            print ('I DO NOT REPLY TO %s  (%d/%d)' % (sender, hash_mod, position))
         return ok
 
     def handle_group_start(self, conn, group, membership):
@@ -96,6 +103,6 @@ print ('hbs is: %s' % hbs)
 
 loop=0
 while loop < 10000:
-    print ('%s: server top of loop %d' % (hb_listener.name, loop))
+    #print ('%s: server top of loop %d' % (hb_listener.name, loop))
     loop += 1
     hbs.run(10)

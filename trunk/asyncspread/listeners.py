@@ -1,6 +1,6 @@
 '''Spread Listeners are implemented here'''
 import time, logging, threading, traceback, sys
-from asyncspread.message import *
+from message import *
 
 def print_tb(logger, who):
         (exc_type, exc_val, tback) = sys.exc_info()
@@ -192,6 +192,7 @@ class SpreadPingListener(SpreadListener):
             len(message.groups) == 1 and
             message.sender == conn.session_name and
             len(data) > 0):
+            data = data.decode('ascii') # needed for python3.x
             (head, ping_id, timestamp) = data.split(':')
             ping_id = int(ping_id)
             elapsed = time.time() - float(timestamp)

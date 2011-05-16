@@ -1,6 +1,6 @@
-#!/usr/bin/python2.4
+#!/usr/bin/python
 import time, sys, logging
-sys.path.append('.')
+sys.path.extend(['.', '..'])
 from asyncspread.connection import AsyncSpread, AsyncSpreadThreaded
 from asyncspread.listeners import SpreadListener, SpreadPingListener, CallbackListener, GroupCallback
 from asyncspread.services import ServiceTypes

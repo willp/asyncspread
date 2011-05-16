@@ -2,10 +2,10 @@
 import socket, struct, copy, asyncore, asynchat, time, logging, sys, threading, traceback, itertools
 import warnings
 from collections import deque
-from asyncspread.message import *
-from asyncspread.services import *
-from asyncspread.listeners import *
-from asyncspread.expt import *
+from message import *
+from services import *
+from listeners import *
+from expt import *
 
 '''This code is released for use under the GNU Public License V3 (GPLv3).
 
@@ -30,18 +30,18 @@ class NullLogHandler(logging.Handler):
 logging.getLogger().addHandler(NullLogHandler())
 
 def print_tb(logger, who):
-        (exc_type, exc_val, tback) = sys.exc_info()
-        logger.warning('Error: Got exception in %s: %s: %s' % (who, type(exc_val), exc_val))
-        traceback.print_tb(tback)
-        if exc_val is not None:
-            logger.info('Traceback: ' + traceback.format_exc())
-            sys.exc_clear()
+    (exc_type, exc_val, tback) = sys.exc_info()
+    logger.warning('Error: Got exception in %s: %s: %s' % (who, type(exc_val), exc_val))
+    traceback.print_tb(tback)
+    if exc_val is not None:
+        logger.info('Traceback: ' + traceback.format_exc())
+        sys.exc_clear()
 
 class AsyncChat26(asynchat.async_chat):
     '''helper to fix for python2.4 asynchat missing a 'map' parameter'''
     def __init__ (self, conn=None, map=None):
         # if python version < 2.6:
-        if sys.version_info[0:2] < (2,6):
+        if sys.version_info[0:2] < (2, 6):
             # python 2.4 and 2.5 need to do this:
             try:
                 self.ac_in_buffer = bytes('')
@@ -299,11 +299,9 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         data_len = len(message)
         svc_type_pkt = self.proto.get_send_pkt(self_discard)
         header = SpreadProto.protocol_create(svc_type_pkt, mesg_type, self.session_name, groups, data_len)
-        self.logger.critical ('Types of header, message: %s, %s' % (type(header), type(message)))
+        #self.logger.critical ('Types of header, message: %s, %s' % (type(header), type(message)))
         self._send(header)
         self._send(message)
-        #pkt = header + message
-        #self._send(pkt)
 
     def unicast(self, group, message, mesg_type):
         '''Send a message to a single group or client.  If the connection is not up, a SpreadException
@@ -434,7 +432,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
 
     def _clear_ibuffer(self):
         '''internal: clears internal input buffer and buffer offset'''
-        self._ibuffer = None # ''
+        self._ibuffer = None # does not use string type here, so python3 will work with bytes
         self._ibuffer_start = 0
 
     def _reset_timer(self, delay=None):
@@ -500,7 +498,12 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
             assert message, 'Code error! Unexpected type of message: %s' % (type(message))
 
     def collect_incoming_data(self, data):
-        '''internal: Buffer the data, used by asyncore.asynchat'''
+        '''internal: Buffer the data, used by asyncore.asynchat.
+        
+        In python 2.x, C{data} is type: str
+        
+        In python 3.x, C{data} is type: bytes
+        '''
         if self._ibuffer is None:
             self._ibuffer = data
         else:
@@ -509,9 +512,9 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
     def found_terminator(self):
         '''internal: invoked by asyncore.asynchat when the terminating condition has been met, which
         is after a fixed number of bytes (produced by the protocol state machine) has been read'''
-        data = self._ibuffer[self._ibuffer_start:(self._ibuffer_start+self.need_bytes)]
+        data = self._ibuffer[self._ibuffer_start:(self._ibuffer_start + self.need_bytes)]
         self._ibuffer_start += self.need_bytes
-        if len(self._ibuffer) > 500: # TODO: remove hard coded value here
+        if len(self._ibuffer) > 1500: # TODO: remove hard coded value here
             self._ibuffer = self._ibuffer[self._ibuffer_start:]
             self._ibuffer_start = 0
         next_cb = self.next_state
@@ -541,7 +544,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         '''internal protocol state: this method parses the authentication methods string, which is a space delimited list
         usually "NULL " but it may be: "NULL IP" or "IP ".  There is trailing whitespace usually.'''
         self.logger.debug('STATE: st_auth_process')
-        method_str = data.decode()
+        method_str = data.decode('ascii')
         methods = method_str.rstrip().split(' ') # space delimited?
         self.logger.critical('AUTH METHODS: %s' % (methods))
         if 'NULL' not in methods: # TODO: add 'IP' support at some point
@@ -598,7 +601,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         It is usually in the format: '#my_private_name#server_name' where my_private_name is
         supplied by the client, and server_name is the unique name of this spread daemon.'''
         self.logger.debug('STATE: st_set_session')
-        self.session_name = data.decode('utf-8')
+        self.session_name = str(data.decode('ascii')) # force my session name to be a str
         self.wait_bytes(48, self.st_read_header)
         self.logger.info('Spread session established to server:  %s:%d' % (self.host, self.port))
         self.logger.info('My private session name for this connection is: "%s"' % (self.session_name))
@@ -613,8 +616,8 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         the length prefixed list of destination groups.  Otherwise, the message payload is read.'''
         self.logger.debug('STATE: st_read_header')
         (svc_type, sender, num_groups, mesg_type, mesg_len) = self.unpack_header(data)
-        sender = sender.decode()
-        self.logger.critical ('SENDER: type=%s  Is:%s' % (type(sender), sender))
+        sender = str(sender.decode('ascii')) # force sender to be a string
+        #self.logger.critical ('SENDER: type=%s  Is:%s' % (type(sender), sender))
         # TODO: add code to flip endianness of svc_type and mesg_type if necessary (independently?)
         endian_test = 0x80000080
         endian_wrong = (svc_type & endian_test) == 0
@@ -650,7 +653,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.logger.debug('STATE: st_read_groups')
         group_packer = SpreadProto.GROUP_FMTS[self.mfactory.num_groups] # '32s' * len(gname)
         groups_padded_b = struct.unpack(group_packer, data)
-        groups_padded = [ g.decode() for g in groups_padded_b ]
+        groups_padded = [ str(g.decode('ascii')) for g in groups_padded_b ] # force groups to be str
         groups = [ g[0:g.find('\x00')] for g in groups_padded ] # trim out nulls
         factory_mesg = self.mfactory.process_groups(groups)
         mesg_len = self.mfactory.mesg_len

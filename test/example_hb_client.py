@@ -4,6 +4,7 @@ sys.path.append('.')
 from asyncspread.connection import AsyncSpread
 from asyncspread.services import ServiceTypes
 from asyncspread.listeners import CallbackListener, GroupCallback
+from asyncspread.listeners import SpreadPingListener
 
 def setup_logging(level=logging.INFO):
     logger = logging.getLogger()
@@ -12,7 +13,7 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.DEBUG)
+setup_logging(logging.INFO)
 myname = 'HBcli-%03d' % (int(time.time()*100) % 1000)
 print ('I am %s' % myname)
 
@@ -36,7 +37,15 @@ def got_mesg(listener, conn, mesg):
 
 listener = CallbackListener(cb_conn=got_conn, cb_dropped=got_dropped, cb_error=got_error, cb_data=got_mesg)
 
-hb_client = AsyncSpread(myname, host, port, listener=listener, start_connect=True)
+class MyListener(SpreadPingListener):
+    def handle_data(self, conn, message):
+        print ('Got message: %s' % (message))
+def ping_cb(ok, elapsed):
+    print ('PING RESPONSE! Ok=%s   Elapsed=%.3f sec' % (ok, elapsed))
+listener2 = SpreadPingListener()
+listener3 = MyListener()
+
+hb_client = AsyncSpread(myname, host, port, listener=listener3, start_connect=True)
 hb_client.set_level(ServiceTypes.AGREED_MESS)
 
 loop=0
@@ -44,6 +53,8 @@ while loop < 10000:
     print ('%s: client top of loop %d' % (myname, loop))
     loop += 1
     hb_client.run(10)
+    if loop % 10 == 0:
+        listener2.ping(hb_client, ping_cb, 10)
     if loop % 3 == 0:
         try:
             hb_client.multicast([':HB'], 'heartbeat ping from client', loop // 10)

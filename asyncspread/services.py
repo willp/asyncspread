@@ -38,8 +38,8 @@ def _make_group_formats(max_groups, max_group_len=32):
 ### TODO: Scope problems here in these class-level values.  Python3 won't preserve the locals in the list comprehension for GROUP_FMTS
 class SpreadProto(object):
     MAX_GROUP_LEN = 32
-    GROUP_FMT = '%ds' % (MAX_GROUP_LEN)
-    HEADER_FMT = 'I%ssIII' % (MAX_GROUP_LEN)
+    #GROUP_FMT = '%ds' % (MAX_GROUP_LEN)
+    HEADER_FMT = 'I%dsIII' % (MAX_GROUP_LEN)
 
     (VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH) = (4, 1, 0)
 

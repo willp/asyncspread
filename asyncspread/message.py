@@ -1,5 +1,5 @@
 import logging
-from asyncspread.services import ServiceTypes
+from services import ServiceTypes
 
 class SpreadMessage(object):
     def _set_data(self, data):
@@ -146,5 +146,5 @@ class SpreadMessageFactory(object):
         self.logger.critical('Spread Protocol ERROR: Unknown message type, neither DataMessage nor MembershipMessage bits set. Unknown svc_type=0x%04x' % (svc_type)) # TODO: raise exception?
         self.this_mesg = OpaqueMessage(sender, svc_type, mesg_type, is_membership=False)
         return self.this_mesg
-        #return None
+
 

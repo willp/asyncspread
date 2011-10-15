@@ -38,7 +38,8 @@ First, ensure you have a working spread daemon to connect to.  You need its host
 
 Next, check out the trunk of the SVN repository for asyncspread from code.google.com:
 
-<code lang="txt">%  svn checkout https://asyncspread.googlecode.com/svn/trunk asyncspread
+{{{
+%  svn checkout https://asyncspread.googlecode.com/svn/trunk asyncspread
 [ ... snip ... ]
 Checked out revision 176.
 %  
@@ -46,13 +47,12 @@ Checked out revision 176.
 % ls
 hb_client.py  hb_server.py
 % 
-</code>
+}}}
 
 Next, start up a single heartbeat server process, 
+{{{
 
-<code lang="text">
 % python hb_example.py servername 4803
-
 I am: HBsrv-650
 2011-10-15 09:30:16,604 ()- CRITICAL - AUTH METHODS: [u'NULL']
 2011-10-15 09:30:16,705 ()- INFO - Server reports it is Spread version: 4.1.0
@@ -64,10 +64,10 @@ hbs is: <asyncspread.connection.AsyncSpread>: name="HBsrv-650", connected=True, 
 Joined the group (:HB).  Current # of HB servers: 1
 Current members: set(['#HBsrv-650#localhost'])
 
-</code>
+}}}
 
 Then, in another window, start up a single client instance:
-<code lang="text">
+{{{
 %  python hb_client.py localhost 4803
 I am HBcli-037
 2011-10-15 09:31:40,476 ()- CRITICAL - AUTH METHODS: [u'NULL']
@@ -84,10 +84,10 @@ HBcli-037: client top of loop 5
 HBcli-037: client top of loop 6
 
 ... etc ...
-</code>
+}}}
 
 In the server's window, you will see:
-<code lang="text">
+{{{
 I REPLY TO #HBcli-037#localhost  (0/0)
 HBsrv-650>> HB message, type=0, sender="#HBcli-037#localhost", message: heartbeat ping from client
 HBsrv-650>> sending reply!
@@ -95,6 +95,6 @@ I REPLY TO #HBcli-037#localhost  (0/0)
 HBsrv-650>> HB message, type=0, sender="#HBcli-037#localhost", message: heartbeat ping from client
 HBsrv-650>> sending reply!
 
-</code>
+}}}
 
 Then, start up two more server processes, and watch the client's window to see how it receives a response from different servers as the hash calculation rebalances the workload among the servers.

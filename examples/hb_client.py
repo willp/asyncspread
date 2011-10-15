@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import time, sys, logging, traceback
-sys.path.append('.')
+sys.path.extend(['.', '..'])
 from asyncspread.connection import AsyncSpread
 from asyncspread.services import ServiceTypes
 from asyncspread.listeners import CallbackListener, GroupCallback

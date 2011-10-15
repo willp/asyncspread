@@ -1,0 +1,32 @@
+#summary Installing Spread
+
+= Installation =
+
+To build and install the Spread daemon, see the documentation at http://spread.org/download.html
+
+= Sample Configuration =
+
+If you are running spread on a local network, you will need to know your local IP address and subnet.  On most home networks, your local IP address will be part of a class-C subnet, which has a netmask of 255.255.255.0 also known as /24 subnet.  This sample configuration assumes you are running spread on a host with an IP in a class-C subnet.
+
+Assuming your host has the following configuration:
+  * IP Address: 192.168.1.202
+  * Netmask: 255.255.255.0
+  * A writable /var/run/spread/ directory (it won't be auto-created by spread, so you will need to mkdir this and have write permissions)
+
+Here is a sample spread.conf file with all optional parameters omitted:
+{{{
+Spread_Segment  192.168.1.255:4803 {
+     localhost  192.168.1.202
+}
+DebugFlags = { PRINT EXIT }
+
+EventPriority =  INFO
+EventTimeStamp = "[%a %d %b %Y %H:%M:%S]"
+SocketPortReuse = AUTO
+MaxSessionMessages = 5000
+RuntimeDir = /var/run/spread
+}}}
+
+If your host's IP address is 10.1.2.57 with a netmask of 255.255.255.0, then you should change the Spread_Segment line to use "10.1.2.255:4803" and change the "localhost" line to "10.1.2.57".
+
+If you have multiple hosts in this subnet that each run spread (a great idea!), then eliminate the "localhost" line and instead use a single line with each hosts' true DNS hostname and IP within that shared subnet.  For more details, consult the Spread documentation.

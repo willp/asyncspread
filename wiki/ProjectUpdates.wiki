@@ -2,6 +2,10 @@
 
 = Latest News =
 
+=== Oct 15, 2011 ===
+
+I'm cleaning up the "test" code, and moving the heartbeat server and client code into an examples/ subdirectory with some extra documentation to provide setup/installation instructions.
+
 === December 31, 2010 ===
 
 Happy new year!  My 2011 resolution is to get the code done with a beta release in January and a production release no later than February and a PYPI release at that time.

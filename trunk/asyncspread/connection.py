@@ -546,7 +546,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.logger.debug('STATE: st_auth_process')
         method_str = data.decode('ascii')
         methods = method_str.rstrip().split(' ') # space delimited?
-        self.logger.critical('AUTH METHODS: %s' % (methods))
+        self.logger.info('AUTH METHODS: %s' % (methods))
         if 'NULL' not in methods: # TODO: add 'IP' support at some point
             self.logger.critical('Spread server does not accept our NULL authentication. Server permited methods are: "%s"' % (data))
             self._drop()

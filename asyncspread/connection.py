@@ -546,8 +546,8 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.logger.debug('STATE: st_auth_process')
         method_str = data.decode('ascii')
         methods = method_str.rstrip().split(' ') # space delimited?
-        self.logger.info('AUTH METHODS: %s' % (methods))
-        if 'NULL' not in methods: # TODO: add 'IP' support at some point
+        self.logger.debug('Auth methods advertised: %s' % (methods))
+        if 'NULL' not in methods: # TODO: add 'IP' support
             self.logger.critical('Spread server does not accept our NULL authentication. Server permited methods are: "%s"' % (data))
             self._drop()
             self.listener._process_error(self, SpreadAuthException('auth rejected'))
@@ -617,7 +617,7 @@ class AsyncSpread(AsyncChat26): # was asynchat.async_chat
         self.logger.debug('STATE: st_read_header')
         (svc_type, sender, num_groups, mesg_type, mesg_len) = self.unpack_header(data)
         sender = str(sender.decode('ascii')) # force sender to be a string
-        #self.logger.critical ('SENDER: type=%s  Is:%s' % (type(sender), sender))
+        #self.logger.debug('SENDER: type=%s  Is:%s' % (type(sender), sender))
         # TODO: add code to flip endianness of svc_type and mesg_type if necessary (independently?)
         endian_test = 0x80000080
         endian_wrong = (svc_type & endian_test) == 0

@@ -43,7 +43,7 @@ def got_mesg(listener, conn, mesg):
 
 my_listener = CallbackListener(cb_conn=got_conn, cb_dropped=got_dropped, cb_error=got_error, cb_data=got_mesg)
 hb_client = AsyncSpread(myname, host, port, listener=my_listener, start_connect=True)
-hb_client.set_level(ServiceTypes.AGREED_MESS)
+hb_client.set_level(ServiceTypes.SAFE_MESS)
 
 for loop in xrange(10000):
     print ('%s: client top of loop %d' % (myname, loop))

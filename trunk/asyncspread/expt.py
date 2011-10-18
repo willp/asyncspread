@@ -29,7 +29,7 @@ class SpreadException(Exception):
         self.msg = SpreadException.errors.get(errno, 'unrecognized error')
 
     def __str__(self):
-        return ('%s(%d) # %s' % (self.type, self.errno, self.msg))
+        return ('%s(%r) # %s' % (self.type, self.errno, self.msg))
 
     def __repr__(self):
         return (self.__str__())

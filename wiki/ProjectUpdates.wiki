@@ -2,6 +2,10 @@
 
 = Latest News =
 
+=== Oct 17, 2011 ===
+
+Wrote up some wiki documentation on the InstallingSpread and Examples pages.  Also did some cleanup of the hb_client and hb_server code so there is less cruft and it is easier to follow.
+
 === Oct 15, 2011 ===
 
 I'm cleaning up the "test" code, and moving the heartbeat server and client code into an examples/ subdirectory with some extra documentation to provide setup/installation instructions.

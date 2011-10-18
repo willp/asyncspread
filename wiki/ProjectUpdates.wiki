@@ -4,7 +4,7 @@
 
 === Oct 17, 2011 ===
 
-Wrote up some wiki documentation on the InstallingSpread and Examples pages.  Also did some cleanup of the hb_client and hb_server code so there is less cruft and it is easier to follow.
+Wrote up some wiki documentation on the InstallingSpread and [Examples] pages.  Also did some cleanup of the hb_client and hb_server code so there is less cruft and it is easier to follow.
 
 === Oct 15, 2011 ===
 

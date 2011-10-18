@@ -1,7 +1,8 @@
 #!/usr/bin/env python
-from __future__ import division
-import time, sys, logging, traceback
+
+import time, sys, logging, traceback, binascii
 sys.path.extend(['.', '..'])
+
 from asyncspread.connection import AsyncSpread
 from asyncspread.listeners import SpreadListener
 
@@ -12,15 +13,12 @@ def setup_logging(level=logging.INFO):
     ch.setFormatter(logging.Formatter('%(asctime)s ()- %(levelname)s - %(message)s'))
     logger.addHandler(ch)
 
-setup_logging(logging.INFO)
-
-import binascii
 
 class HeartbeatServer(SpreadListener):
     def __init__(self):
         SpreadListener.__init__(self)
         self.hb_count = self.hb_sent = 0
-        self.name = 'HBsrv-%03d' % (int(time.time()*100) % 1000)
+        self.name = 'srv-%03d' % (int(time.time() * 100) % 1000)
         print ('I am: %s' % self.name)
 
     def handle_connected(self, conn):
@@ -54,19 +52,19 @@ class HeartbeatServer(SpreadListener):
         position = members.index(conn.session_name)
         sender = sender.encode('utf-8')
         hash_mod = binascii.crc32(sender) % num_servers
-        ok = (hash_mod == position)
+        ok = bool(hash_mod == position)
         if ok:
-            print ('I REPLY TO %s  (%d/%d)' % (sender, hash_mod, position))
+            print ('I REPLY TO %r    (%d/%d)' % (sender, hash_mod, position))
         else:
-            print ('I DO NOT REPLY TO %s  (%d/%d)' % (sender, hash_mod, position))
+            print ('I DO >NOT< REPLY TO %r  (%d/%d)' % (sender, hash_mod, position))
         return ok
 
     def handle_group_start(self, conn, group, membership):
-        print ('Joined the group (%s).  Current # of HB servers: %d' % (group, len(membership)))
+        print ('I JOINed the group (%s).  Current # of HB servers: %d' % (group, len(membership)))
         print ('Current members: %s' % membership)
 
     def handle_group_join(self, conn, group, member, cause):
-        print ('Another HB server joined group %s: "%s" joined. Reason: %s' % (group, member, cause))
+        print ('Another HB server JOINed group %s: "%s" joined. Reason: %s' % (group, member, cause))
         print ('Total HB servers listening: %d' % len(self.get_group_members(group)))
 
     def handle_group_leave(self, conn, group, member, cause):
@@ -78,31 +76,34 @@ class HeartbeatServer(SpreadListener):
         sender = str(message.sender)
         data = message.data
         mtype = message.mesg_type
-        reply = self.compute_responder(sender, conn)
-        print ('%s>> HB message, type=%d, sender="%s", message: %s' % (conn.name, mtype, sender, data))
-        # and send a response back
-        if reply:
+        do_reply = self.compute_responder(sender, conn)
+        print ('%s>> HB received: type=%d, sender="%s", message: %s' % (conn.name, mtype, sender, data))
+        if do_reply:
+            self.send_reply(conn, sender, mtype)
+
+    def send_reply(self, conn, recipient, mtype):
+            # send a response back
             self.hb_sent += 1
             print ('%s>> sending reply!' % (conn.name))
-            reply = 'HB Reply:: %d received, %d sent' % (self.hb_count, self.hb_sent)
+            reply = 'HB Reply:: %d received, %d sent messages' % (self.hb_count, self.hb_sent)
             try:
-                conn.unicast(sender, reply, mtype+1)
+                conn.unicast(recipient, reply, mtype + 1)
             except:
-                print ('Lost connection when attempting to reply.  Oh well.')
+                print ('Lost connection when attempting to reply.')
                 (exc_type, exc_val, tback) = sys.exc_info()
                 print ('Exception: %s / %s' % (exc_type, exc_val))
                 traceback.print_tb(tback)
 
+setup_logging()
 hb_listener = HeartbeatServer()
 
-(host, port) = ('localhost', 24999)
+(host, port) = ('localhost', 4803)
 if len(sys.argv) > 1: host = sys.argv[1]
 if len(sys.argv) > 2: port = int(sys.argv[2])
-hbs = AsyncSpread(hb_listener.name, host, port, listener=hb_listener, start_connect=True)
-print ('hbs is: %s' % hbs)
 
-loop=0
-while loop < 10000:
-    #print ('%s: server top of loop %d' % (hb_listener.name, loop))
-    loop += 1
-    hbs.run(10)
+hb_srv = AsyncSpread(hb_listener.name, host, port, listener=hb_listener, start_connect=True)
+
+print ('I am hb srv: %s' % hb_srv)
+
+for loop in xrange(10000):
+    hb_srv.run(10, timeout=0.1)

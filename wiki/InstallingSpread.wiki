@@ -22,7 +22,7 @@ DebugFlags = { PRINT EXIT }
 
 EventPriority =  INFO
 EventTimeStamp = "[%a %d %b %Y %H:%M:%S]"
-SocketPortReuse = AUTO
+SocketPortReuse = ON
 MaxSessionMessages = 5000
 RuntimeDir = /var/run/spread
 }}}
